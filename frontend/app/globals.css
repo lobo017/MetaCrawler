@@ -1,0 +1,44 @@
+@import "tailwindcss";
+
+@theme inline {
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family: var(--font-geist-sans), Inter, system-ui, sans-serif;
+  background: radial-gradient(circle at 75% 0%, #00304b 0%, #021027 30%, #02091a 68%, #010718 100%);
+  color: #e6edf7;
+}
+
+.app-shell {
+  max-width: 1060px;
+  margin: 0 auto;
+  padding: 44px 18px 56px;
+}
+
+.panel {
+  background: #ffffff;
+  border: 1px solid #d6deea;
+  border-radius: 8px;
+  color: #344054;
+}
+
+.panel-title {
+  margin: 0 0 14px;
+  font-size: 38px;
+  font-weight: 700;
+  color: #eef2f8;
+}
+
+.muted-title {
+  color: #d8deea;
+  font-size: 40px;
+  margin: 0 0 18px;
+}
