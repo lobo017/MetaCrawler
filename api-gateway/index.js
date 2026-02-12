@@ -1,29 +1,60 @@
-/**
- * MetaCrawler - API Gateway
- * -------------------------
- * This is the unified entry point for the entire platform.
- * It aggregates data from Python, Go, and Node.js services.
- * It exposes both REST and GraphQL endpoints.
- *
- * Usage:
- *   node index.js
- */
+const http = require('http');
+const { handleGraphQL, getStats, getJobs } = require('./resolvers');
 
-// const express = require('express');
-// const { ApolloServer } = require('apollo-server-express');
-// const resolvers = require('./resolvers');
-// const typeDefs = require('./schema'); // You would define GraphQL schema here
+const port = Number(process.env.PORT || 4000);
 
-// async function startServer() {
-//   const app = express();
-//   const server = new ApolloServer({ typeDefs, resolvers });
-//   await server.start();
-//   server.applyMiddleware({ app });
+const server = http.createServer(async (req, res) => {
+  if (req.method === 'GET' && req.url === '/health') {
+    return json(res, 200, { status: 'ok', service: 'api-gateway' });
+  }
 
-//   app.listen(4000, () => {
-//     console.log('API Gateway running on http://localhost:4000');
-//     console.log('GraphQL endpoint: http://localhost:4000/graphql');
-//   });
-// }
+  if (req.method === 'GET' && req.url === '/jobs') {
+    return json(res, 200, getJobs());
+  }
 
-// startServer();
+  if (req.method === 'GET' && req.url === '/stats') {
+    return json(res, 200, getStats());
+  }
+
+  if (req.method === 'POST' && req.url === '/graphql') {
+    const body = await readJsonBody(req);
+    try {
+      const result = await handleGraphQL(body);
+      return json(res, 200, { data: result });
+    } catch (error) {
+      return json(res, 200, { errors: [{ message: error.message }] });
+    }
+  }
+
+  return json(res, 404, { error: 'not found' });
+});
+
+server.listen(port, () => {
+  console.log(`API Gateway running on http://localhost:${port}`);
+});
+
+function json(res, status, payload) {
+  res.writeHead(status, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify(payload));
+}
+
+function readJsonBody(req) {
+  return new Promise((resolve, reject) => {
+    let raw = '';
+    req.on('data', (chunk) => {
+      raw += chunk;
+    });
+    req.on('end', () => {
+      if (!raw) {
+        resolve({});
+        return;
+      }
+      try {
+        resolve(JSON.parse(raw));
+      } catch (error) {
+        reject(new Error('invalid JSON body'));
+      }
+    });
+    req.on('error', reject);
+  });
+}

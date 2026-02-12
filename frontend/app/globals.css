@@ -1,0 +1,32 @@
+@import "tailwindcss";
+
+:root {
+  --bg: #070b14;
+  --panel: rgba(15, 23, 42, 0.76);
+  --border: rgba(148, 163, 184, 0.2);
+  --text: #e2e8f0;
+}
+
+@theme inline {
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  background:
+    radial-gradient(circle at 20% 0%, rgba(59, 130, 246, 0.35), transparent 40%),
+    radial-gradient(circle at 85% 10%, rgba(14, 165, 233, 0.2), transparent 35%),
+    var(--bg);
+  color: var(--text);
+  font-family: var(--font-geist-sans), Inter, system-ui, sans-serif;
+}
+
+.card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  backdrop-filter: blur(8px);
+}
