@@ -115,6 +115,7 @@ export default function JobController({ onCreated }) {
             value={text}
             onChange={(event) => setText(event.target.value)}
             className="input-dark w-full min-h-[100px] text-sm resize-y"
+            placeholder="Enter text to analyze with NLP. If blank, the URL content will be used."
             aria-describedby="nlp-hint"
           />
           <p id="nlp-hint" className="sr-only">Enter text to analyze with NLP. If blank, the URL content will be used.</p>
