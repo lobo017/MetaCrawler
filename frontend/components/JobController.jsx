@@ -3,9 +3,9 @@
 import { useState } from 'react';
 
 export default function JobController({ onCreated }) {
-  const [url, setUrl] = useState('https://example.com');
+  const [url, setUrl] = useState('');
   const [type, setType] = useState('auto');
-  const [text, setText] = useState('MetaCrawler is a great platform for scalable web data extraction.');
+  const [text, setText] = useState('');
   const [status, setStatus] = useState('');
   const [statusType, setStatusType] = useState('info'); // 'info' | 'success' | 'error'
   const [isSubmitting, setIsSubmitting] = useState(false);
