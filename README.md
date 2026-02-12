@@ -1,4 +1,4 @@
-# AI Webscraping Platform — Polyglot, Modular, and Full Stack
+# MetaCrawler
 
 MetaCrawler is a full-stack AI-powered web scraping platform that combines Python, Go, and Node.js microservices behind a unified API gateway and a Next.js dashboard.
 
