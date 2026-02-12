@@ -39,15 +39,18 @@ async function createJob(input) {
   const job = {
     id: crypto.randomUUID(),
     url: input.url,
-    type: input.type,
+    type: input.type === 'auto' ? determineScraperType(input.url) + ' (auto)' : input.type,
     status: 'queued',
     result: null,
     createdAt: new Date().toISOString(),
   };
   jobs.unshift(job);
 
+  // We pass the resolved type to dispatchJob so the actual service call is correct
+  const dispatchInput = { ...input, type: job.type.replace(' (auto)', '') };
+
   try {
-    const result = await dispatchJob(input);
+    const result = await dispatchJob(dispatchInput);
     job.status = 'done';
     job.result = JSON.stringify(result);
   } catch (error) {
@@ -58,12 +61,39 @@ async function createJob(input) {
   return job;
 }
 
+/**
+ * Heuristic to classify URLs.
+ * If a site is known to be a Single Page App (SPA) or heavily dynamic, we use the Node/Playwright scraper.
+ * Otherwise, we default to the faster, lighter Go scraper.
+ */
+function determineScraperType(url) {
+  try {
+    const urlObj = new URL(url);
+    const hostname = urlObj.hostname.toLowerCase();
+    
+    // List of domains that typically require JS rendering
+    const dynamicDomains = [
+      'twitter.com', 'x.com', 
+      'linkedin.com', 
+      'instagram.com', 
+      'facebook.com', 
+      'youtube.com',
+      'tiktok.com',
+      'reactjs.org' // Example of a client-side rendered doc site
+    ];
+
+    if (dynamicDomains.some(domain => hostname.includes(domain))) {
+      return 'dynamic';
+    }
+    return 'static';
+  } catch (e) {
+    return 'static'; // Fallback if URL parsing fails
+  }
+}
+
 async function dispatchJob(input) {
   const { url, type, selector, text } = input;
-  if (!url || !type) {
-    throw new Error('input.url and input.type are required');
-  }
-
+  
   if (type === 'static') {
     return callService(`${SERVICE_URLS.static}/scrape`, { url });
   }
