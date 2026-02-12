@@ -76,3 +76,37 @@ def _extract_keywords(text: str, limit: int = 8) -> list[str]:
     filtered = [token for token in tokens if token not in stopwords]
     ranked = Counter(filtered).most_common(limit)
     return [token for token, _ in ranked]
+
+def answer_question(text: str, question: str) -> dict[str, Any]:
+    """
+    Basic extractive QA: Finds the sentence in the text that best matches the question words.
+    Replace this logic with an LLM (OpenAI/HuggingFace) for production use.
+    """
+    if not text or not question:
+        return {"answer": "No context provided.", "confidence": 0.0}
+
+    # Simple sentence splitting
+    sentences = re.split(r'(?<!\w\.\w.)(?<![A-Z][a-z]\.)(?<=\.|\?)\s', text)
+    
+    question_words = set(re.findall(r"\w+", question.lower()))
+    best_score = 0
+    best_sentence = "I couldn't find the answer in the text."
+
+    for sentence in sentences:
+        sentence_words = set(re.findall(r"\w+", sentence.lower()))
+        if not sentence_words:
+            continue
+        
+        # Calculate overlap score (Jaccard similarityish)
+        intersection = question_words.intersection(sentence_words)
+        score = len(intersection) / len(sentence_words) if sentence_words else 0
+        
+        if score > best_score:
+            best_score = score
+            best_sentence = sentence
+
+    return {
+        "answer": best_sentence,
+        "confidence": round(best_score, 2),
+        "source_preview": best_sentence[:50] + "..."
+    }

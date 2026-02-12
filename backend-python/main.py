@@ -26,6 +26,10 @@ class ScrapePayload(BaseModel):
     selector: str | None = None
     async_task: bool = False
 
+class QAPayload(BaseModel):
+    text: str = Field(..., min_length=1)
+    question: str = Field(..., min_length=1)
+
 
 @app.get("/")
 def health_check() -> dict[str, str]:
@@ -75,3 +79,8 @@ def quick_scrape(payload: ScrapePayload, background_tasks: BackgroundTasks) -> d
         return scrape_url(url, payload.selector)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    
+@app.post("/qa")
+def question_answer(payload: QAPayload) -> dict[str, Any]:
+    from app.nlp.processor import answer_question
+    return answer_question(payload.text, payload.question)

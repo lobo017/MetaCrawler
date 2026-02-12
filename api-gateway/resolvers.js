@@ -13,6 +13,10 @@ async function handleGraphQL(body) {
   if (query.includes('mutation') && query.includes('createJob')) {
     return { createJob: await createJob(body.variables?.input || {}) };
   }
+  if (query.includes('mutation') && query.includes('askQuestion')) {
+    const { jobId, question } = body.variables || {};
+    return { askQuestion: await askQuestion(jobId, question) };
+  }
   if (query.includes('jobs') || query.includes('stats')) {
     return {
       jobs: getJobs(),
@@ -20,6 +24,32 @@ async function handleGraphQL(body) {
     };
   }
   throw new Error('Unsupported operation');
+}
+
+async function askQuestion(jobId, question) {
+  const job = jobs.find((j) => j.id === jobId);
+  if (!job) throw new Error('Job not found');
+  if (job.status !== 'done' || !job.result) throw new Error('Job is not ready');
+
+  const resultData = JSON.parse(job.result);
+  
+  // Normalize text extraction based on scraper type
+  let text = '';
+  if (resultData.Text) text = resultData.Text; // Go scraper
+  else if (Array.isArray(resultData.content)) text = resultData.content.join(' '); // Node scraper
+  else if (resultData.text) text = resultData.text; // Python scraper
+  
+  if (!text) throw new Error('No text content found in job result');
+
+  // Call Python AI Service
+  const response = await fetch(`${SERVICE_URLS.ai}/qa`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text, question }),
+  });
+
+  if (!response.ok) throw new Error('QA Service failed');
+  return response.json();
 }
 
 function getJobs() {
