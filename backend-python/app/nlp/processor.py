@@ -1,41 +1,78 @@
-"""
-MetaCrawler - NLP Processor Module
-----------------------------------
-This module contains the logic for text analysis and AI enrichment.
-It should be designed to be modular so you can swap out models (e.g., NLTK vs. SpaCy vs. Transformers).
+"""Lightweight NLP processor with pluggable analysis tasks."""
 
-Functions:
-    - analyze_sentiment(text): Returns polarity/subjectivity.
-    - extract_entities(text): Returns people, orgs, locations.
-    - classify_topic(text): Returns the main category of the text.
-"""
+from __future__ import annotations
 
-# # import spacy or nltk or transformers
+import re
+from collections import Counter
+from typing import Any
 
-# def analyze_text(text: str, tasks: list = None):
-#     """
-#     Main entry point for NLP analysis.
-#     
-#     Args:
-#         text (str): Content to analyze.
-#         tasks (list): List of specific analyses to run (default to all).
-#     
-#     Returns:
-#         dict: Combined results from all requested tasks.
-#     """
-#     # TODO: Orchestrate the calls to specific analysis functions below
-#     pass
+POSITIVE_WORDS = {
+    "good",
+    "great",
+    "excellent",
+    "positive",
+    "success",
+    "up",
+    "fast",
+    "better",
+    "love",
+}
+NEGATIVE_WORDS = {
+    "bad",
+    "poor",
+    "negative",
+    "fail",
+    "down",
+    "slow",
+    "worse",
+    "error",
+    "hate",
+}
 
-# def _analyze_sentiment(text: str):
-#     """
-#     Internal function to calculate sentiment.
-#     Returns: {'polarity': float, 'subjectivity': float}
-#     """
-#     pass
 
-# def _extract_entities(text: str):
-#     """
-#     Internal function to extract Named Entities (NER).
-#     Returns: [{'text': 'Google', 'label': 'ORG'}, ...]
-#     """
-#     pass
+def analyze_text(text: str, tasks: list[str] | None = None) -> dict[str, Any]:
+    requested = set(task.lower() for task in (tasks or ["sentiment", "entities", "keywords"]))
+    result: dict[str, Any] = {"length": len(text), "tasks": sorted(requested)}
+
+    if "sentiment" in requested:
+        result["sentiment"] = _analyze_sentiment(text)
+    if "entities" in requested or "ner" in requested:
+        result["entities"] = _extract_entities(text)
+    if "keywords" in requested:
+        result["keywords"] = _extract_keywords(text)
+
+    return result
+
+
+def _analyze_sentiment(text: str) -> dict[str, float]:
+    tokens = [token.lower() for token in re.findall(r"[A-Za-z]+", text)]
+    if not tokens:
+        return {"polarity": 0.0, "subjectivity": 0.0}
+
+    pos_hits = sum(token in POSITIVE_WORDS for token in tokens)
+    neg_hits = sum(token in NEGATIVE_WORDS for token in tokens)
+
+    polarity = (pos_hits - neg_hits) / max(len(tokens), 1)
+    subjectivity = (pos_hits + neg_hits) / max(len(tokens), 1)
+    return {"polarity": round(polarity, 4), "subjectivity": round(subjectivity, 4)}
+
+
+def _extract_entities(text: str) -> list[dict[str, str]]:
+    candidates = re.findall(r"\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\b", text)
+    seen = set()
+    entities = []
+    for candidate in candidates:
+        normalized = candidate.strip()
+        if len(normalized) < 2 or normalized in seen:
+            continue
+        seen.add(normalized)
+        entities.append({"text": normalized, "label": "PROPN"})
+    return entities
+
+
+def _extract_keywords(text: str, limit: int = 8) -> list[str]:
+    tokens = [token.lower() for token in re.findall(r"[A-Za-z]{4,}", text)]
+    stopwords = {"that", "with", "from", "this", "have", "were", "your", "about", "http", "https"}
+    filtered = [token for token in tokens if token not in stopwords]
+    ranked = Counter(filtered).most_common(limit)
+    return [token for token, _ in ranked]

@@ -1,0 +1,113 @@
+'use client';
+
+import { useState } from 'react';
+
+const placeholders = {
+  auto: 'https://example.com',
+  static: 'https://example.com',
+  dynamic: 'https://news.ycombinator.com',
+  ai: 'https://example.com/blog-post',
+};
+
+export default function JobController({ onCreated }) {
+  const [url, setUrl] = useState(placeholders.static);
+  const [type, setType] = useState('static');
+  const [text, setText] = useState('');
+  const [status, setStatus] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const handleSubmit = async (event) => {
+    event.preventDefault();
+    setStatus('');
+    setIsSubmitting(true);
+
+    const query = `
+      mutation CreateJob($input: CreateJobInput!) {
+        createJob(input: $input) {
+          id
+          status
+        }
+      }
+    `;
+
+    const payload = { url, type };
+    if (type === 'ai' && text.trim()) payload.text = text;
+
+    try {
+      const response = await fetch(process.env.NEXT_PUBLIC_GRAPHQL_URL || 'http://localhost:4000/graphql', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query, variables: { input: payload } }),
+      });
+
+      const result = await response.json();
+      if (result.errors?.length) {
+        setStatus(`Failed: ${result.errors[0].message}`);
+      } else {
+        setStatus('Job submitted.');
+        await onCreated();
+      }
+    } catch (error) {
+      setStatus(`Failed: ${error.message}`);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-4">
+      <h2 className="text-[32px] font-semibold text-slate-200">Start New Job</h2>
+
+      <div>
+        <label className="mb-1 block text-[27px] text-slate-200">Target URL</label>
+        <input
+          type="url"
+          value={url}
+          onChange={(event) => setUrl(event.target.value)}
+          placeholder={placeholders[type]}
+          className="w-full rounded-md border border-slate-300 px-3 py-2 text-[28px] text-slate-700 outline-none focus:border-blue-400"
+          required
+        />
+      </div>
+
+      <div>
+        <label className="mb-1 block text-[27px] text-slate-200">Scraper Type</label>
+        <select
+          value={type}
+          onChange={(event) => {
+            const next = event.target.value;
+            setType(next);
+            if (!url) setUrl(placeholders[next]);
+          }}
+          className="w-full rounded-md border border-slate-300 px-3 py-2 text-[28px] text-slate-700 outline-none focus:border-blue-400"
+        >
+          <option value="static">Go (Static HTML)</option>
+          <option value="dynamic">Node (Dynamic JS)</option>
+          <option value="auto">Auto (Choose for me)</option>
+          <option value="ai">Python (NLP)</option>
+        </select>
+      </div>
+
+      {type === 'ai' && (
+        <div>
+          <label className="mb-1 block text-[27px] text-slate-200">Text for NLP (optional)</label>
+          <textarea
+            value={text}
+            onChange={(event) => setText(event.target.value)}
+            className="min-h-24 w-full rounded-md border border-slate-300 px-3 py-2 text-[24px] text-slate-700 outline-none focus:border-blue-400"
+          />
+        </div>
+      )}
+
+      <button
+        type="submit"
+        disabled={isSubmitting}
+        className="rounded-md bg-blue-600 px-6 py-2 text-[30px] font-medium text-white hover:bg-blue-700 disabled:opacity-60"
+      >
+        {isSubmitting ? 'Submitting…' : 'Start Scraping'}
+      </button>
+
+      {status ? <p className="text-[24px] text-slate-600">{status}</p> : null}
+    </form>
+  );
+}

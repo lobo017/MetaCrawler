@@ -1,10 +1,3 @@
-from flask import Flask
+"""Compatibility module exposing the FastAPI app."""
 
-app = Flask(__name__)
-
-@app.route('/')
-def home():
-    return {'message': 'Python backend is running'}
-
-if __name__=='__main__':
-    app.run(host='0.0.0.0', port=5000)
+from main import app

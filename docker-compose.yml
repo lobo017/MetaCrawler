@@ -1,5 +1,49 @@
+version: '3.9'
+
+services:
+  python:
+    build: ./backend-python
+    ports:
+      - '8000:8000'
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+    depends_on:
+      - redis
+
+  go:
+    build: ./backend-go
+    ports:
+      - '8080:8080'
 
   node:
     build: ./backend-node
     ports:
-      - "3000:3000"
+      - '3000:3000'
+
+  gateway:
+    build: ./api-gateway
+    ports:
+      - '4000:4000'
+    environment:
+      - GO_SERVICE_URL=http://go:8080
+      - NODE_SERVICE_URL=http://node:3000
+      - PYTHON_SERVICE_URL=http://python:8000
+    depends_on:
+      - python
+      - go
+      - node
+
+  frontend:
+    build: ./frontend
+    ports:
+      - '3001:3000'
+    environment:
+      - NEXT_PUBLIC_GRAPHQL_URL=http://localhost:4000/graphql
+    depends_on:
+      - gateway
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - '6379:6379'
