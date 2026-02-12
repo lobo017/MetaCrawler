@@ -8,33 +8,31 @@ from typing import Any
 from fastapi import BackgroundTasks, FastAPI, HTTPException
 from pydantic import BaseModel, Field, HttpUrl
 
-from app.nlp.processor import analyze_text
+# Import the new answer_question function
+from app.nlp.processor import analyze_text, answer_question
 from app.scrapers.basic_scraper import scrape_url
 from celery_worker import celery_app, process_nlp_task, process_quick_scrape_task
 
 app = FastAPI(title="MetaCrawler Python Service", version="1.0.0")
-
 
 class AnalyzePayload(BaseModel):
     text: str = Field(..., min_length=1)
     tasks: list[str] | None = None
     async_task: bool = False
 
-
 class ScrapePayload(BaseModel):
     url: HttpUrl
     selector: str | None = None
     async_task: bool = False
 
+# New Payload for QA
 class QAPayload(BaseModel):
     text: str = Field(..., min_length=1)
     question: str = Field(..., min_length=1)
 
-
 @app.get("/")
 def health_check() -> dict[str, str]:
     return {"status": "ok", "service": "python-ml"}
-
 
 @app.get("/health")
 def extended_health() -> dict[str, Any]:
@@ -45,7 +43,6 @@ def extended_health() -> dict[str, Any]:
         "celery_registered_tasks": sorted(celery_app.tasks.keys())[:5],
     }
 
-
 @app.post("/analyze")
 def analyze_content(payload: AnalyzePayload) -> dict[str, Any]:
     if payload.async_task:
@@ -53,7 +50,6 @@ def analyze_content(payload: AnalyzePayload) -> dict[str, Any]:
         return {"task_id": task.id, "status": "queued"}
 
     return analyze_text(payload.text, payload.tasks)
-
 
 @app.post("/scrape/quick")
 def quick_scrape(payload: ScrapePayload, background_tasks: BackgroundTasks) -> dict[str, Any]:
@@ -79,8 +75,8 @@ def quick_scrape(payload: ScrapePayload, background_tasks: BackgroundTasks) -> d
         return scrape_url(url, payload.selector)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    
+
+# New Endpoint
 @app.post("/qa")
-def question_answer(payload: QAPayload) -> dict[str, Any]:
-    from app.nlp.processor import answer_question
+def qa_endpoint(payload: QAPayload) -> dict[str, Any]:
     return answer_question(payload.text, payload.question)

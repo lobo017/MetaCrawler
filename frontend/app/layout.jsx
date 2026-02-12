@@ -20,6 +20,10 @@ export default function RootLayout({ children }) {
   return (
     <html lang="en">
       <body className={`${geistSans.variable} ${geistMono.variable} min-h-screen antialiased`}>
+        {/* Accessibility: Skip to main content for keyboard users */}
+        <a href="#main-content" className="skip-link">
+          Skip to main content
+        </a>
         {children}
       </body>
     </html>

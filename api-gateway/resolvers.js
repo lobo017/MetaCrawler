@@ -1,3 +1,4 @@
+/* api-gateway/resolvers.js */
 const crypto = require('crypto');
 
 const jobs = [];
@@ -10,12 +11,12 @@ const SERVICE_URLS = {
 
 async function handleGraphQL(body) {
   const query = body.query || '';
-  if (query.includes('mutation') && query.includes('createJob')) {
-    return { createJob: await createJob(body.variables?.input || {}) };
-  }
   if (query.includes('mutation') && query.includes('askQuestion')) {
     const { jobId, question } = body.variables || {};
     return { askQuestion: await askQuestion(jobId, question) };
+  }
+  if (query.includes('mutation') && query.includes('createJob')) {
+    return { createJob: await createJob(body.variables?.input || {}) };
   }
   if (query.includes('jobs') || query.includes('stats')) {
     return {
@@ -24,32 +25,6 @@ async function handleGraphQL(body) {
     };
   }
   throw new Error('Unsupported operation');
-}
-
-async function askQuestion(jobId, question) {
-  const job = jobs.find((j) => j.id === jobId);
-  if (!job) throw new Error('Job not found');
-  if (job.status !== 'done' || !job.result) throw new Error('Job is not ready');
-
-  const resultData = JSON.parse(job.result);
-  
-  // Normalize text extraction based on scraper type
-  let text = '';
-  if (resultData.Text) text = resultData.Text; // Go scraper
-  else if (Array.isArray(resultData.content)) text = resultData.content.join(' '); // Node scraper
-  else if (resultData.text) text = resultData.text; // Python scraper
-  
-  if (!text) throw new Error('No text content found in job result');
-
-  // Call Python AI Service
-  const response = await fetch(`${SERVICE_URLS.ai}/qa`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text, question }),
-  });
-
-  if (!response.ok) throw new Error('QA Service failed');
-  return response.json();
 }
 
 function getJobs() {
@@ -65,22 +40,61 @@ function getStats() {
   };
 }
 
+/**
+ * Smart Router Logic:
+ * Detects if a URL likely requires a full browser (Dynamic) or just a simple request (Static).
+ */
+function determineScraperType(url) {
+  try {
+    const urlObj = new URL(url);
+    const hostname = urlObj.hostname.toLowerCase();
+    
+    // Domains known to be Single Page Apps (SPAs) or require JS
+    const dynamicDomains = [
+      'twitter.com', 'x.com',
+      'linkedin.com',
+      'instagram.com',
+      'facebook.com',
+      'tiktok.com',
+      'youtube.com',
+      'reactjs.org'
+    ];
+
+    if (dynamicDomains.some(d => hostname.includes(d))) {
+      return 'dynamic';
+    }
+    // Default to the high-performance Go scraper for everything else
+    return 'static';
+  } catch (e) {
+    return 'static';
+  }
+}
+
 async function createJob(input) {
+  let jobType = input.type;
+  
+  // If 'auto', resolve the best scraper before creating the job
+  if (jobType === 'auto') {
+    const bestFit = determineScraperType(input.url);
+    // We tag it as "(auto)" so the frontend shows that it was a smart decision
+    jobType = `${bestFit} (auto)`;
+  }
+
   const job = {
     id: crypto.randomUUID(),
     url: input.url,
-    type: input.type === 'auto' ? determineScraperType(input.url) + ' (auto)' : input.type,
+    type: jobType,
     status: 'queued',
     result: null,
     createdAt: new Date().toISOString(),
   };
   jobs.unshift(job);
 
-  // We pass the resolved type to dispatchJob so the actual service call is correct
-  const dispatchInput = { ...input, type: job.type.replace(' (auto)', '') };
-
   try {
-    const result = await dispatchJob(dispatchInput);
+    // Resolve the actual internal type (remove " (auto)" suffix if present)
+    const serviceType = jobType.split(' ')[0];
+    
+    const result = await dispatchJob({ ...input, type: serviceType });
     job.status = 'done';
     job.result = JSON.stringify(result);
   } catch (error) {
@@ -91,39 +105,12 @@ async function createJob(input) {
   return job;
 }
 
-/**
- * Heuristic to classify URLs.
- * If a site is known to be a Single Page App (SPA) or heavily dynamic, we use the Node/Playwright scraper.
- * Otherwise, we default to the faster, lighter Go scraper.
- */
-function determineScraperType(url) {
-  try {
-    const urlObj = new URL(url);
-    const hostname = urlObj.hostname.toLowerCase();
-    
-    // List of domains that typically require JS rendering
-    const dynamicDomains = [
-      'twitter.com', 'x.com', 
-      'linkedin.com', 
-      'instagram.com', 
-      'facebook.com', 
-      'youtube.com',
-      'tiktok.com',
-      'reactjs.org' // Example of a client-side rendered doc site
-    ];
-
-    if (dynamicDomains.some(domain => hostname.includes(domain))) {
-      return 'dynamic';
-    }
-    return 'static';
-  } catch (e) {
-    return 'static'; // Fallback if URL parsing fails
-  }
-}
-
 async function dispatchJob(input) {
   const { url, type, selector, text } = input;
-  
+  if (!url || !type) {
+    throw new Error('input.url and input.type are required');
+  }
+
   if (type === 'static') {
     return callService(`${SERVICE_URLS.static}/scrape`, { url });
   }
@@ -141,6 +128,7 @@ async function dispatchJob(input) {
 }
 
 async function callService(endpoint, payload) {
+  // Use generic fetch (available in Node 18+)
   const response = await fetch(endpoint, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -151,6 +139,44 @@ async function callService(endpoint, payload) {
     throw new Error(`Service call failed (${response.status}) at ${endpoint}`);
   }
   return response.json();
+}
+
+/**
+ * "Talk to Your Data" — Finds a completed job's scraped text and
+ * forwards the user's question to the Python QA microservice.
+ */
+async function askQuestion(jobId, question) {
+  if (!jobId || !question) {
+    throw new Error('jobId and question are required');
+  }
+
+  const job = jobs.find((j) => j.id === jobId);
+  if (!job) throw new Error(`Job not found: ${jobId}`);
+  if (job.status !== 'done') throw new Error(`Job is not complete (status: ${job.status})`);
+
+  // Extract the scraped text from the stored JSON result
+  let scrapedText = '';
+  try {
+    const parsed = JSON.parse(job.result);
+    // Different scrapers store text in different fields
+    scrapedText = parsed.text
+      || (Array.isArray(parsed.content) ? parsed.content.join(' ') : '')
+      || (Array.isArray(parsed.matches) ? parsed.matches.join(' ') : '')
+      || '';
+  } catch {
+    scrapedText = job.result || '';
+  }
+
+  if (!scrapedText || scrapedText.length < 10) {
+    return { answer: 'This job did not produce enough text content to analyze.', confidence: 0 };
+  }
+
+  const qaResult = await callService(`${SERVICE_URLS.ai}/qa`, {
+    text: scrapedText,
+    question,
+  });
+
+  return qaResult;
 }
 
 module.exports = { handleGraphQL, getJobs, getStats };
