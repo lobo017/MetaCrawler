@@ -1,56 +1,77 @@
-"""
-MetaCrawler - Python Microservice Entry Point
----------------------------------------------
-This file initializes the FastAPI application, which serves as the interface
-for the Python microservice. This service handles:
-1. AI/NLP enrichment tasks (Sentiment, NER, Classification).
-2. Simple, low-volume HTML scraping tasks.
-3. Serving ML models.
+"""FastAPI entry point for the MetaCrawler Python microservice."""
 
-Usage:
-    Run with uvicorn: uvicorn main:app --reload
-"""
+from __future__ import annotations
 
-# from fastapi import FastAPI, BackgroundTasks
-# from app.nlp.processor import analyze_text
-# from app.scrapers.basic_scraper import scrape_url
+import os
+from typing import Any
 
-# app = FastAPI(title="MetaCrawler Python Service", version="1.0.0")
+from fastapi import BackgroundTasks, FastAPI, HTTPException
+from pydantic import BaseModel, Field, HttpUrl
 
-# @app.get("/")
-# def health_check():
-#     """
-#     Health check endpoint to verify service status.
-#     Returns:
-#         dict: {"status": "ok", "service": "python-ml"}
-#     """
-#     pass
+from app.nlp.processor import analyze_text
+from app.scrapers.basic_scraper import scrape_url
+from celery_worker import celery_app, process_nlp_task, process_quick_scrape_task
 
-# @app.post("/analyze")
-# def analyze_content(payload: dict):
-#     """
-#     Endpoint to trigger NLP analysis on provided text.
-#     
-#     Args:
-#         payload (dict): Contains 'text' and 'tasks' (e.g., ['sentiment', 'ner']).
-#     
-#     Returns:
-#         dict: Enriched data with sentiment scores, entities, etc.
-#     """
-#     # TODO: Implement logic to call app.nlp.processor.analyze_text
-#     pass
+app = FastAPI(title="MetaCrawler Python Service", version="1.0.0")
 
-# @app.post("/scrape/quick")
-# def quick_scrape(payload: dict, background_tasks: BackgroundTasks):
-#     """
-#     Endpoint for immediate, low-overhead scraping of a single URL.
-#     
-#     Args:
-#         payload (dict): Contains 'url' and 'selector' (optional).
-#     
-#     Returns:
-#         dict: Job ID or immediate result.
-#     """
-#     # TODO: Implement logic to call app.scrapers.basic_scraper.scrape_url
-#     # Consider using background_tasks for non-blocking execution
-#     pass
+
+class AnalyzePayload(BaseModel):
+    text: str = Field(..., min_length=1)
+    tasks: list[str] | None = None
+    async_task: bool = False
+
+
+class ScrapePayload(BaseModel):
+    url: HttpUrl
+    selector: str | None = None
+    async_task: bool = False
+
+
+@app.get("/")
+def health_check() -> dict[str, str]:
+    return {"status": "ok", "service": "python-ml"}
+
+
+@app.get("/health")
+def extended_health() -> dict[str, Any]:
+    return {
+        "status": "ok",
+        "service": "python-ml",
+        "celery_broker": os.getenv("CELERY_BROKER_URL", "redis://redis:6379/0"),
+        "celery_registered_tasks": sorted(celery_app.tasks.keys())[:5],
+    }
+
+
+@app.post("/analyze")
+def analyze_content(payload: AnalyzePayload) -> dict[str, Any]:
+    if payload.async_task:
+        task = process_nlp_task.delay(payload.text, payload.tasks)
+        return {"task_id": task.id, "status": "queued"}
+
+    return analyze_text(payload.text, payload.tasks)
+
+
+@app.post("/scrape/quick")
+def quick_scrape(payload: ScrapePayload, background_tasks: BackgroundTasks) -> dict[str, Any]:
+    url = str(payload.url)
+    if payload.async_task:
+        task = process_quick_scrape_task.delay(url, payload.selector)
+        return {"task_id": task.id, "status": "queued"}
+
+    if payload.selector:
+        container: dict[str, Any] = {}
+
+        def _run() -> None:
+            container["result"] = scrape_url(url, payload.selector)
+
+        background_tasks.add_task(_run)
+        return {
+            "status": "accepted",
+            "message": "Scrape scheduled in background.",
+            "url": url,
+        }
+
+    try:
+        return scrape_url(url, payload.selector)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
