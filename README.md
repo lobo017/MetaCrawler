@@ -1,41 +1,86 @@
 # AI Webscraping Platform — Polyglot, Modular, and Full Stack
 
-This project is a modern, full-stack **AI-powered webscraping platform** built with a polyglot microservices architecture (Python, Go, and Node.js backends) and a responsive React frontend. It showcases advanced webscraping, microservices, concurrency, and AI/ML integration, demonstrating robust data collection, automated analysis, and real-time user interaction across a flexible cloud-native stack.
+MetaCrawler is a full-stack AI-powered web scraping platform that combines Python, Go, and Node.js microservices behind a unified API gateway and a Next.js dashboard.
 
----
+## Architecture
 
-## 🧩 Architecture Overview
+- **frontend** (`Next.js`): dashboard for creating jobs and tracking stats/results.
+- **api-gateway** (`Node.js`): single entry point exposing `/graphql`, `/jobs`, and `/stats`.
+- **backend-python** (`FastAPI` + `Celery hooks`): static scraping and NLP enrichment.
+- **backend-go** (`net/http`): fast static page scraping endpoint.
+- **backend-node** (`Express`): dynamic scraping path (Playwright when available + fallback fetch mode).
+- **redis**: broker/result backend for Celery tasks.
 
-- **Frontend:**  
-  React/Next.js dashboard for data visualization and user actions.
+## Implemented Endpoints
 
-- **Backend:**  
-  Microservices in:  
-  - **Python:** ML/NLP & webscraping  
-  - **Go:** High-concurrency scraping and orchestration  
-  - **Node.js:** Dynamic web/automation tasks
+### Python service (`:8000`)
+- `GET /health`
+- `POST /scrape/quick`
+- `POST /analyze`
 
-- **AI/ML:**  
-  Integrates NLP and machine learning (sentiment analysis, entity recognition, classification).
+### Go service (`:8080`)
+- `GET /health`
+- `POST /scrape`
 
-- **Communication:**  
-  REST/GraphQL API gateway connecting frontend and polyglot backend.
+### Node service (`:3000`)
+- `GET /health`
+- `POST /scrape`
 
-- **Database:**  
-  MongoDB/Postgres for efficient data storage and retrieval.
+### API Gateway (`:4000`)
+- `GET /health`
+- `POST /graphql`
+- `GET /jobs`
+- `GET /stats`
 
-- **DevOps:**  
-  Dockerized for easy deployment, CI/CD pipeline ready.
+Supported GraphQL operations:
+- `query { jobs { ... } stats { ... } }`
+- `mutation CreateJob($input: CreateJobInput!) { createJob(input: $input) { ... } }`
 
----
+## Run with Docker Compose
 
-## ✨ Highlights
+```bash
+docker compose up --build
+```
 
-- Modular design with clear separation of scraping, AI/ML, and orchestration
-- Uses best tools and language features for each job
-- Aligned with industry microservices/containerization/DevOps best practices
-- Extensible for new sources, analytics, and AI features
+Dashboard: `http://localhost:3001`
 
----
+## Local Development
 
-**Tech Stack:** Python · Go · Node.js · React/Next.js · Docker · REST/GraphQL · MongoDB/Postgres
+### Python
+```bash
+cd backend-python
+pip install -r requirements.txt
+uvicorn main:app --reload --port 8000
+```
+
+### Go
+```bash
+cd backend-go
+go run ./cmd/server
+```
+
+### Node backend
+```bash
+cd backend-node
+npm install
+npm start
+```
+
+### API gateway
+```bash
+cd api-gateway
+npm start
+```
+
+### Frontend
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Set in frontend shell if needed:
+
+```bash
+export NEXT_PUBLIC_GRAPHQL_URL=http://localhost:4000/graphql
+```

@@ -1,42 +1,57 @@
-/*
-MetaCrawler - Go Microservice Entry Point
------------------------------------------
-This is the main entry point for the high-performance Go scraper service.
-It initializes the HTTP server, connects to the message queue (Redis/RabbitMQ),
-and starts the concurrent scraping engine.
-
-Usage:
-    go run cmd/server/main.go
-*/
-
 package main
 
-// import (
-// 	"log"
-// 	"net/http"
-// 	"github.com/go-chi/chi/v5"
-// )
+import (
+	"encoding/json"
+	"log"
+	"net/http"
+	"os"
 
-// func main() {
-// 	// 1. Initialize Router (Chi or Gin)
-// 	// r := chi.NewRouter()
+	"github.com/lobo017/MetaCrawler/backend-go/internal/scraper"
+)
 
-// 	// 2. Define Routes
-// 	// r.Get("/health", HealthCheck)
-// 	// r.Post("/scrape", SubmitScrapeJob)
+type scrapeRequest struct {
+	URL string `json:"url"`
+}
 
-// 	// 3. Start Queue Consumer (Background Routine)
-// 	// go queue.StartConsumer()
+func main() {
+	http.HandleFunc("/", healthCheck)
+	http.HandleFunc("/health", healthCheck)
+	http.HandleFunc("/scrape", submitScrapeJob)
 
-// 	// 4. Start HTTP Server
-// 	// log.Println("Go Service listening on :8080")
-// 	// http.ListenAndServe(":8080", r)
-// }
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
 
-// func HealthCheck(w http.ResponseWriter, r *http.Request) {
-// 	// w.Write([]byte("OK"))
-// }
+	log.Printf("Go Service listening on :%s", port)
+	if err := http.ListenAndServe(":"+port, nil); err != nil {
+		log.Fatalf("go service failed: %v", err)
+	}
+}
 
-// func SubmitScrapeJob(w http.ResponseWriter, r *http.Request) {
-// 	// TODO: Parse request, validate URL, push to queue or start goroutine
-// }
+func healthCheck(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok", "service": "go-scraper"})
+}
+
+func submitScrapeJob(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req scrapeRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.URL == "" {
+		http.Error(w, "invalid payload", http.StatusBadRequest)
+		return
+	}
+
+	result, err := scraper.Scrape(req.URL)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(result)
+}
