@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 import hashlib
 import json
+import logging
 import os
 from pathlib import Path
 import re
@@ -25,6 +26,8 @@ MAX_CHUNK_WORDS = 160
 
 DATA_DIR = Path(__file__).resolve().parents[2] / "data"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -104,7 +107,7 @@ def crawl_site_go(seed_url: str, max_pages: int = DEFAULT_MAX_PAGES, max_depth: 
     payload = response.json()
 
     pages = _normalize_pages(payload.get("pages") or [])
-    blocked = payload.get("blockedUrls", [])
+    blocked = payload.get("blockedUrls") or []
     failed_urls = payload.get("failedUrls") or []
     failed = [{"url": url, "error": "go_crawler_failed"} for url in failed_urls]
     if payload.get("pages") is None:
@@ -248,12 +251,14 @@ def crawl_site_node(seed_url: str, max_pages: int = DEFAULT_MAX_PAGES, max_depth
 
 
 def crawl_site(seed_url: str, max_pages: int = DEFAULT_MAX_PAGES, max_depth: int = DEFAULT_MAX_DEPTH) -> tuple[CrawlResult, str]:
+    go_result: CrawlResult | None = None
     try:
         go_result = crawl_site_go(seed_url, max_pages=max_pages, max_depth=max_depth)
-        if go_result.pages:
-            return go_result, "go"
-    except requests.RequestException:
-        pass
+    except Exception as exc:
+        logger.warning("Go crawler failed for %s: %s", seed_url, exc)
+
+    if go_result is not None and go_result.pages:
+        return go_result, "go"
 
     python_result = crawl_site_python(seed_url, max_pages=max_pages, max_depth=max_depth)
     if python_result.pages:
