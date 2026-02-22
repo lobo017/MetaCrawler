@@ -7,6 +7,9 @@ export default function ChatModal({ job, onClose }) {
   ]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
+  const [mode, setMode] = useState('job');
+  const [siteUrl, setSiteUrl] = useState(job.url || '');
+  const [trainStatus, setTrainStatus] = useState('');
   const scrollRef = useRef(null);
   const inputRef = useRef(null);
   const modalRef = useRef(null);
@@ -58,6 +61,39 @@ export default function ChatModal({ job, onClose }) {
     if (e.target === e.currentTarget) onClose();
   };
 
+  const trainSite = async () => {
+    if (!siteUrl.trim()) {
+      setTrainStatus('Site URL is required.');
+      return;
+    }
+
+    setTrainStatus('Training site knowledge...');
+    try {
+      const query = `
+        mutation TrainSite($url: String!, $maxPages: Int, $maxDepth: Int) {
+          crawlAndTrainSite(url: $url, maxPages: $maxPages, maxDepth: $maxDepth) {
+            engine
+            pageCount
+          }
+        }
+      `;
+      const res = await fetch(process.env.NEXT_PUBLIC_GRAPHQL_URL || 'http://localhost:4000/graphql', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query, variables: { url: siteUrl, maxPages: 25, maxDepth: 2 } }),
+      });
+      const body = await res.json();
+      if (body.errors?.length) {
+        setTrainStatus(`Training failed: ${body.errors[0].message}`);
+        return;
+      }
+      const trained = body.data?.crawlAndTrainSite;
+      setTrainStatus(`Trained with ${trained?.engine || 'unknown'} on ${trained?.pageCount || 0} pages.`);
+    } catch (err) {
+      setTrainStatus('Training failed due to network error.');
+    }
+  };
+
   const handleSend = async (e) => {
     e.preventDefault();
     if (!input.trim()) return;
@@ -68,22 +104,44 @@ export default function ChatModal({ job, onClose }) {
     setLoading(true);
 
     try {
-      const query = `
-        mutation Ask($jobId: String!, $question: String!) {
-          askQuestion(jobId: $jobId, question: $question) {
-            answer
+      let query;
+      let variables;
+
+      if (mode === 'site') {
+        query = `
+          query AskSite($url: String!, $question: String!, $topK: Int) {
+            askSite(url: $url, question: $question, topK: $topK) {
+              answer
+            }
           }
-        }
-      `;
+        `;
+        variables = { url: siteUrl, question: userMsg.text, topK: 3 };
+      } else {
+        query = `
+          mutation Ask($jobId: String!, $question: String!) {
+            askQuestion(jobId: $jobId, question: $question) {
+              answer
+            }
+          }
+        `;
+        variables = { jobId: job.id, question: userMsg.text };
+      }
 
       const res = await fetch(process.env.NEXT_PUBLIC_GRAPHQL_URL || 'http://localhost:4000/graphql', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query, variables: { jobId: job.id, question: userMsg.text } }),
+        body: JSON.stringify({ query, variables }),
       });
 
       const body = await res.json();
-      const answer = body.data?.askQuestion?.answer || "Sorry, I couldn't process that.";
+      if (body.errors?.length) {
+        setMessages((prev) => [...prev, { role: 'bot', text: body.errors[0].message || "Sorry, I couldn't process that." }]);
+        return;
+      }
+
+      const answer = mode === 'site'
+        ? (body.data?.askSite?.answer || "Sorry, I couldn't process that.")
+        : (body.data?.askQuestion?.answer || "Sorry, I couldn't process that.");
 
       setMessages((prev) => [...prev, { role: 'bot', text: answer }]);
     } catch (err) {
@@ -113,6 +171,13 @@ export default function ChatModal({ job, onClose }) {
               <span aria-hidden="true">🤖</span> Data Q&A Bot
             </h3>
             <p className="text-xs text-slate-400 truncate max-w-[300px]" title={job.url}>{job.url}</p>
+            <div className="mt-2 flex items-center gap-2">
+              <label className="text-xs text-slate-400">Mode:</label>
+              <select value={mode} onChange={(e) => setMode(e.target.value)} className="input-dark text-xs py-1 px-2">
+                <option value="job">Job QA</option>
+                <option value="site">Site Knowledge</option>
+              </select>
+            </div>
           </div>
           <button
             onClick={onClose}
@@ -125,6 +190,22 @@ export default function ChatModal({ job, onClose }) {
         </div>
 
         {/* Chat Area */}
+        {mode === 'site' && (
+          <div className="p-3 border-b border-white/10 bg-white/5 space-y-2">
+            <label className="text-xs text-slate-400">Site URL</label>
+            <input
+              value={siteUrl}
+              onChange={(e) => setSiteUrl(e.target.value)}
+              className="input-dark w-full text-xs"
+              placeholder="https://example.com"
+            />
+            <button type="button" onClick={trainSite} className="text-xs bg-cyan-600 text-white px-3 py-1 rounded">
+              Train site
+            </button>
+            {trainStatus && <p className="text-xs text-slate-300">{trainStatus}</p>}
+          </div>
+        )}
+
         <div
           className="flex-1 overflow-y-auto p-4 space-y-4"
           role="log"

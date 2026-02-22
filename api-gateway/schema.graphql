@@ -1,0 +1,22 @@
+type SiteTrainResult {
+  engine: String!
+  pageCount: Int!
+  artifactPath: String
+  confidence: Float
+  warnings: [String!]
+}
+
+type SiteAskResult {
+  answer: String!
+  citations: [String!]
+  confidence: Float
+  snippet: String
+}
+
+type Query {
+  askSite(url: String!, question: String!, topK: Int): SiteAskResult!
+}
+
+type Mutation {
+  crawlAndTrainSite(url: String!, maxPages: Int, maxDepth: Int): SiteTrainResult!
+}
