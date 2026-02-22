@@ -105,7 +105,8 @@ def crawl_site_go(seed_url: str, max_pages: int = DEFAULT_MAX_PAGES, max_depth: 
 
     pages = _normalize_pages(payload.get("pages") or [])
     blocked = payload.get("blockedUrls", [])
-    failed = [{"url": url, "error": "go_crawler_failed"} for url in payload.get("failedUrls", [])]
+    failed_urls = payload.get("failedUrls") or []
+    failed = [{"url": url, "error": "go_crawler_failed"} for url in failed_urls]
     if payload.get("pages") is None:
         # keep debugging visibility
         failed.append({"url": seed_url, "error": f"go returned pages=null; keys={list(payload.keys())}"})
