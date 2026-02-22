@@ -4,8 +4,8 @@ const crypto = require('crypto');
 const jobs = [];
 
 const SERVICE_URLS = {
-  static: process.env.GO_SERVICE_URL || 'http://localhost:8080',
-  dynamic: process.env.NODE_SERVICE_URL || 'http://localhost:3000',
+  static: process.env.GO_SERVICE_URL || 'http://go:8080',
+  dynamic: process.env.NODE_SERVICE_URL || 'http://node:3000',
   ai: process.env.PYTHON_SERVICE_URL || 'http://localhost:8000',
 };
 

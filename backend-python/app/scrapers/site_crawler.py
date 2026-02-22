@@ -78,25 +78,23 @@ def _build_robot_parser(start_url: str) -> urllib.robotparser.RobotFileParser:
     return parser
 
 
-def _normalize_pages(pages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _normalize_pages(pages):
+    if not pages:
+        return []
     normalized = []
     for page in pages:
-        text = _normalize_whitespace(page.get("text", ""))
-        if not text:
+        if not isinstance(page, dict):
             continue
-        normalized.append(
-            {
-                "url": page.get("url", ""),
-                "title": _normalize_whitespace(page.get("title", "")),
-                "text": text,
-                "chunks": _split_into_chunks(text),
-            }
-        )
-    return normalized
+        normalized.append({
+            "url": page.get("url") or page.get("link") or "",
+            "title": page.get("title") or "",
+            "text": page.get("text") or page.get("content") or "",
+        })
+    return [p for p in normalized if p["url"] and p["text"]]
 
 
 def crawl_site_go(seed_url: str, max_pages: int = DEFAULT_MAX_PAGES, max_depth: int = DEFAULT_MAX_DEPTH) -> CrawlResult:
-    go_service = os.getenv("GO_SERVICE_URL", "http://localhost:8080")
+    go_service = os.getenv("GO_SERVICE_URL", "http://go:8080")
     response = requests.post(
         f"{go_service}/crawl",
         json={"url": seed_url, "max_pages": max_pages, "max_depth": max_depth},
@@ -105,9 +103,12 @@ def crawl_site_go(seed_url: str, max_pages: int = DEFAULT_MAX_PAGES, max_depth: 
     response.raise_for_status()
     payload = response.json()
 
-    pages = _normalize_pages(payload.get("pages", []))
+    pages = _normalize_pages(payload.get("pages") or [])
     blocked = payload.get("blockedUrls", [])
     failed = [{"url": url, "error": "go_crawler_failed"} for url in payload.get("failedUrls", [])]
+    if payload.get("pages") is None:
+        # keep debugging visibility
+        failed.append({"url": seed_url, "error": f"go returned pages=null; keys={list(payload.keys())}"})
     return CrawlResult(pages=pages, blocked_urls=blocked, failed_urls=failed)
 
 
@@ -170,7 +171,7 @@ def crawl_site_python(seed_url: str, max_pages: int = DEFAULT_MAX_PAGES, max_dep
 
 
 def crawl_site_node(seed_url: str, max_pages: int = DEFAULT_MAX_PAGES, max_depth: int = DEFAULT_MAX_DEPTH) -> CrawlResult:
-    node_service = os.getenv("NODE_SERVICE_URL", "http://localhost:3000")
+    node_service = os.getenv("NODE_SERVICE_URL", "http://node:3000")
     robot_parser = _build_robot_parser(seed_url)
     root_domain = _domain_from_url(seed_url)
 
