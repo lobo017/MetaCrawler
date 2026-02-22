@@ -1,10 +1,20 @@
 from fastapi.testclient import TestClient
+import pytest
 
 import main
 from app.scrapers.site_crawler import CrawlResult
 
 
 client = TestClient(main.app)
+
+
+@pytest.fixture(autouse=True)
+def clean_site_kbs():
+    main.site_kbs.clear()
+    main.site_kb = main.SiteKnowledgeBase()
+    yield
+    main.site_kbs.clear()
+    main.site_kb = main.SiteKnowledgeBase()
 
 
 def test_site_train_then_ask_happy_path(monkeypatch):
@@ -44,11 +54,10 @@ def test_site_train_then_ask_happy_path(monkeypatch):
     assert body["confidence"] >= 0
 
 
-def test_site_ask_without_training_returns_error(tmp_path):
-    missing_url = "https://missing.example"
+def test_site_ask_without_training_returns_error():
     res = client.post(
         "/site/ask",
-        json={"url": missing_url, "question": "Any content?", "top_k": 3},
+        json={"url": "https://missing.example", "question": "Any content?", "top_k": 3},
     )
     assert res.status_code == 404
     assert "No trained site model" in res.json()["detail"]

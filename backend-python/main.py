@@ -34,6 +34,15 @@ class QAPayload(BaseModel):
     question: str = Field(..., min_length=1)
 
 site_kb = SiteKnowledgeBase()
+site_kbs: dict[str, SiteKnowledgeBase] = {}
+
+
+def site_key(url: str) -> str:
+    parsed = urlparse(url)
+    host = parsed.netloc.lower()
+    if host.startswith("www."):
+        host = host[4:]
+    return host
 
 class SiteTrainPayload(BaseModel):
     url: HttpUrl
@@ -41,6 +50,7 @@ class SiteTrainPayload(BaseModel):
     max_depth: int = Field(default=2, ge=0, le=6)
 
 class SiteQuestionPayload(BaseModel):
+    url: HttpUrl
     question: str = Field(..., min_length=1)
     top_k: int = Field(default=3, ge=1, le=10)
 
@@ -100,7 +110,12 @@ def qa_endpoint(payload: QAPayload) -> dict[str, Any]:
 def crawl_and_train(payload: SiteTrainPayload) -> dict[str, Any]:
     crawl, engine = crawl_site(str(payload.url), max_pages=payload.max_pages, max_depth=payload.max_depth)
     crawl_file = save_crawl(str(payload.url), crawl, engine)
-    training = site_kb.train_from_crawl(crawl_file)
+    kb = SiteKnowledgeBase()
+    training = kb.train_from_crawl(crawl_file)
+    site_kbs[site_key(str(payload.url))] = kb
+
+    global site_kb
+    site_kb = kb
     return {
         "crawl_file": str(crawl_file),
         "blocked_count": len(crawl.blocked_urls),
@@ -113,4 +128,14 @@ def crawl_and_train(payload: SiteTrainPayload) -> dict[str, Any]:
 
 @app.post("/site/ask")
 def ask_site(payload: SiteQuestionPayload) -> dict[str, Any]:
-    return site_kb.query(payload.question, top_k=payload.top_k)
+    key = site_key(str(payload.url))
+    kb = site_kbs.get(key)
+    if kb is None:
+        raise HTTPException(status_code=404, detail="No trained site model found for this URL. Run /site/crawl-and-train first.")
+
+    try:
+        return kb.query(payload.question, top_k=payload.top_k)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to answer site question: {exc}") from exc
