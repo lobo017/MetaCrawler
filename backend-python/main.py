@@ -40,7 +40,6 @@ class SiteTrainPayload(BaseModel):
     max_depth: int = Field(default=2, ge=0, le=6)
 
 class SiteQuestionPayload(BaseModel):
-    url: HttpUrl
     question: str = Field(..., min_length=1)
     top_k: int = Field(default=3, ge=1, le=10)
 
@@ -113,16 +112,4 @@ def crawl_and_train(payload: SiteTrainPayload) -> dict[str, Any]:
 
 @app.post("/site/ask")
 def ask_site(payload: SiteQuestionPayload) -> dict[str, Any]:
-    site_url = str(payload.url)
-    if site_kb.site_url != site_url:
-        from app.nlp.site_qa import latest_crawl_file_for_url
-
-        crawl_file = latest_crawl_file_for_url(site_url)
-        if not crawl_file:
-            raise HTTPException(status_code=404, detail="No trained site model found for this URL. Run /site/crawl-and-train first.")
-        site_kb.train_from_crawl(crawl_file)
-
-    result = site_kb.query(payload.question, top_k=payload.top_k)
-    if result.get("confidence", 0.0) == 0.0 and result.get("matches") == [] and "No site model is trained yet" in result.get("answer", ""):
-        raise HTTPException(status_code=404, detail="No trained site model found for this URL. Run /site/crawl-and-train first.")
-    return result
+    return site_kb.query(payload.question, top_k=payload.top_k)
