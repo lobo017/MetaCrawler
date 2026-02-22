@@ -43,7 +43,12 @@ func Crawl(seed string, options CrawlOptions) *CrawlResult {
 		options.Workers = 6
 	}
 
-	res := &CrawlResult{SeedURL: seed}
+	res := &CrawlResult{
+		SeedURL:     seed,
+		Pages:       []CrawlPage{},
+		BlockedURLs: []string{},
+		FailedURLs:  []string{},
+	}
 	seedURL, err := url.Parse(seed)
 	if err != nil {
 		res.FailedURLs = append(res.FailedURLs, seed)
@@ -107,7 +112,20 @@ func Crawl(seed string, options CrawlOptions) *CrawlResult {
 	}
 
 	res.PageCount = len(res.Pages)
+	ensureNonNilSlices(res)
 	return res
+}
+
+func ensureNonNilSlices(res *CrawlResult) {
+	if res.Pages == nil {
+		res.Pages = []CrawlPage{}
+	}
+	if res.BlockedURLs == nil {
+		res.BlockedURLs = []string{}
+	}
+	if res.FailedURLs == nil {
+		res.FailedURLs = []string{}
+	}
 }
 
 func fetchPage(pageURL string) (CrawlPage, []string, bool) {
