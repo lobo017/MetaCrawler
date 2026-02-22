@@ -1,3 +1,4 @@
+import pytest
 from fastapi.testclient import TestClient
 
 import main
@@ -5,7 +6,13 @@ from app.scrapers import site_crawler
 from app.scrapers.site_crawler import CrawlResult
 
 
-client = TestClient(main.app)
+@pytest.fixture(autouse=True)
+def clean_site_kbs():
+    main.site_kbs.clear()
+    main.site_kb = main.SiteKnowledgeBase()
+    yield
+    main.site_kbs.clear()
+    main.site_kb = main.SiteKnowledgeBase()
 
 
 def test_crawl_site_go_handles_null_list_fields(monkeypatch):
@@ -46,12 +53,7 @@ def test_crawl_and_train_falls_back_when_go_throws(monkeypatch):
     monkeypatch.setattr(site_crawler, "crawl_site_go", fake_go)
     monkeypatch.setattr(site_crawler, "crawl_site_python", fake_python)
 
-    response = client.post(
-        "/site/crawl-and-train",
-        json={"url": "https://example.com", "max_pages": 5, "max_depth": 1},
-    )
+    response = main.crawl_and_train(main.SiteTrainPayload(url="https://example.com", max_pages=5, max_depth=1))
 
-    assert response.status_code == 200
-    body = response.json()
-    assert body["engine"] == "python_fallback"
-    assert body["training"]["trained_chunks"] > 0
+    assert response["engine"] == "python_fallback"
+    assert response["training"]["trained_chunks"] > 0

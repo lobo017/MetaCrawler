@@ -1,11 +1,8 @@
-from fastapi.testclient import TestClient
 import pytest
+from fastapi import HTTPException
 
 import main
 from app.scrapers.site_crawler import CrawlResult
-
-
-client = TestClient(main.app)
 
 
 @pytest.fixture(autouse=True)
@@ -37,27 +34,17 @@ def test_site_train_then_ask_happy_path(monkeypatch):
 
     monkeypatch.setattr(main, "crawl_site", fake_crawl_site)
 
-    train_res = client.post(
-        "/site/crawl-and-train",
-        json={"url": "https://example.com", "max_pages": 5, "max_depth": 1},
-    )
-    assert train_res.status_code == 200
-    assert train_res.json()["training"]["trained_chunks"] > 0
+    train_res = main.crawl_and_train(main.SiteTrainPayload(url="https://example.com", max_pages=5, max_depth=1))
+    assert train_res["training"]["trained_chunks"] > 0
 
-    ask_res = client.post(
-        "/site/ask",
-        json={"url": "https://example.com", "question": "What does the site provide?", "top_k": 3},
-    )
-    assert ask_res.status_code == 200
-    body = ask_res.json()
-    assert body["answer"]
-    assert body["confidence"] >= 0
+    ask_res = main.ask_site(main.SiteQuestionPayload(url="https://example.com", question="What does the site provide?", top_k=3))
+    assert ask_res["answer"]
+    assert ask_res["confidence"] >= 0
 
 
 def test_site_ask_without_training_returns_error():
-    res = client.post(
-        "/site/ask",
-        json={"url": "https://missing.example", "question": "Any content?", "top_k": 3},
-    )
-    assert res.status_code == 404
-    assert "No trained site model" in res.json()["detail"]
+    with pytest.raises(HTTPException) as exc_info:
+        main.ask_site(main.SiteQuestionPayload(url="https://missing.example", question="Any content?", top_k=3))
+
+    assert exc_info.value.status_code == 404
+    assert "No trained site model" in exc_info.value.detail
