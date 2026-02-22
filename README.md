@@ -106,32 +106,8 @@ curl -X POST http://localhost:8000/site/crawl-and-train \
 ```bash
 curl -X POST http://localhost:8000/site/ask \
   -H 'Content-Type: application/json' \
-  -d '{"url":"https://example.com","question":"What products are offered?","top_k":3}'
+  -d '{"question":"What products are offered?","top_k":3}'
 ```
 
 The first endpoint uses the Go crawler (`/crawl`) as the primary concurrent engine, falls back to the Python crawler if Go fails or yields no pages, and finally falls back to the Node scraper (`/scrape`) if needed. It stores crawl output under `backend-python/data/` and trains a local TF-IDF retriever (no paid APIs).
 
-Note: this is retrieval-based QA using a local TF-IDF index over crawled text, **not** LLM fine-tuning or model training.
-
-
-GraphQL equivalents through the gateway:
-
-```graphql
-mutation TrainSite($url: String!, $maxPages: Int, $maxDepth: Int) {
-  crawlAndTrainSite(url: $url, maxPages: $maxPages, maxDepth: $maxDepth) {
-    engine
-    pageCount
-    artifactPath
-    warnings
-  }
-}
-
-query AskSite($url: String!, $question: String!, $topK: Int) {
-  askSite(url: $url, question: $question, topK: $topK) {
-    answer
-    confidence
-    citations
-    snippet
-  }
-}
-```
