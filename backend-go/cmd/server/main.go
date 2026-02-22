@@ -13,10 +13,18 @@ type scrapeRequest struct {
 	URL string `json:"url"`
 }
 
+type crawlRequest struct {
+	URL      string `json:"url"`
+	MaxPages int    `json:"max_pages"`
+	MaxDepth int    `json:"max_depth"`
+	Workers  int    `json:"workers"`
+}
+
 func main() {
 	http.HandleFunc("/", healthCheck)
 	http.HandleFunc("/health", healthCheck)
 	http.HandleFunc("/scrape", submitScrapeJob)
+	http.HandleFunc("/crawl", submitCrawlJob)
 
 	port := os.Getenv("PORT")
 	if port == "" {
@@ -51,6 +59,28 @@ func submitScrapeJob(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
 	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(result)
+}
+
+func submitCrawlJob(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req crawlRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.URL == "" {
+		http.Error(w, "invalid payload", http.StatusBadRequest)
+		return
+	}
+
+	result := scraper.Crawl(req.URL, scraper.CrawlOptions{
+		MaxPages: req.MaxPages,
+		MaxDepth: req.MaxDepth,
+		Workers:  req.Workers,
+	})
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(result)
