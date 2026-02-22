@@ -1,4 +1,5 @@
 import pytest
+from fastapi.testclient import TestClient
 
 import main
 from app.scrapers import site_crawler
