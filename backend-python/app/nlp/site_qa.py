@@ -20,18 +20,48 @@ class SiteKnowledgeBase:
         self.vectorizer: TfidfVectorizer | None = None
         self.matrix = None
 
+    @staticmethod
+    def chunk_text(text: str, chunk_size: int = 900, overlap: int = 150) -> list[str]:
+        cleaned = " ".join((text or "").split()).strip()
+        if not cleaned:
+            return []
+
+        if chunk_size <= 0:
+            chunk_size = 900
+        if overlap < 0:
+            overlap = 0
+        if overlap >= chunk_size:
+            overlap = max(chunk_size // 4, 1)
+
+        chunks: list[str] = []
+        step = chunk_size - overlap
+        start = 0
+        while start < len(cleaned):
+            piece = cleaned[start : start + chunk_size].strip()
+            if piece:
+                chunks.append(piece)
+            start += step
+        return chunks
+
     def train_from_crawl(self, crawl_file: Path) -> dict[str, Any]:
         payload = json.loads(crawl_file.read_text(encoding="utf-8"))
         pages = payload.get("pages", [])
 
         chunks: list[dict[str, str]] = []
         for page in pages:
-            for chunk in page.get("chunks", []):
+            page_chunks = page.get("chunks") or []
+            if not page_chunks:
+                page_chunks = self.chunk_text(page.get("text") or "")
+
+            for chunk in page_chunks:
+                clean_chunk = " ".join(str(chunk).split()).strip()
+                if not clean_chunk:
+                    continue
                 chunks.append(
                     {
                         "url": page.get("url", ""),
                         "title": page.get("title", ""),
-                        "text": chunk,
+                        "text": clean_chunk,
                     }
                 )
 
