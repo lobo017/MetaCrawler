@@ -17,10 +17,13 @@ MetaCrawler is a full-stack AI-powered web scraping platform that combines Pytho
 - `GET /health`
 - `POST /scrape/quick`
 - `POST /analyze`
+- `POST /site/crawl-and-train`
+- `POST /site/ask`
 
 ### Go service (`:8080`)
 - `GET /health`
 - `POST /scrape`
+- `POST /crawl`
 
 ### Node service (`:3000`)
 - `GET /health`
@@ -84,3 +87,27 @@ Set in frontend shell if needed:
 ```bash
 export NEXT_PUBLIC_GRAPHQL_URL=http://localhost:4000/graphql
 ```
+
+
+## Site-aware crawling and local QA
+
+The Python service can now build a local retrieval model from a single site and answer questions from that site corpus.
+
+1. Crawl and train a local model (respects `robots.txt`):
+
+```bash
+curl -X POST http://localhost:8000/site/crawl-and-train \
+  -H 'Content-Type: application/json' \
+  -d '{"url":"https://example.com","max_pages":25,"max_depth":2}'
+```
+
+2. Ask questions against the trained site model:
+
+```bash
+curl -X POST http://localhost:8000/site/ask \
+  -H 'Content-Type: application/json' \
+  -d '{"question":"What products are offered?","top_k":3}'
+```
+
+The first endpoint uses the Go crawler (`/crawl`) as the primary concurrent engine, falls back to the Python crawler if Go fails or yields no pages, and finally falls back to the Node scraper (`/scrape`) if needed. It stores crawl output under `backend-python/data/` and trains a local TF-IDF retriever (no paid APIs).
+

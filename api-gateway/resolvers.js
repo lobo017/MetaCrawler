@@ -112,7 +112,11 @@ async function dispatchJob(input) {
   }
 
   if (type === 'static') {
-    return callService(`${SERVICE_URLS.static}/scrape`, { url });
+    try {
+      return await callService(`${SERVICE_URLS.static}/scrape`, { url });
+    } catch (_error) {
+      return callService(`${SERVICE_URLS.ai}/scrape/quick`, { url });
+    }
   }
   if (type === 'dynamic') {
     return callService(`${SERVICE_URLS.dynamic}/scrape`, { url, selector });
