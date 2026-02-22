@@ -18,6 +18,14 @@ async function handleGraphQL(body) {
   if (query.includes('mutation') && query.includes('createJob')) {
     return { createJob: await createJob(body.variables?.input || {}) };
   }
+  if (query.includes('mutation') && query.includes('crawlAndTrainSite')) {
+    const { url, maxPages, maxDepth } = body.variables || {};
+    return { crawlAndTrainSite: await crawlAndTrainSite(url, maxPages, maxDepth) };
+  }
+  if (query.includes('query') && query.includes('askSite')) {
+    const { url, question, topK } = body.variables || {};
+    return { askSite: await askSite(url, question, topK) };
+  }
   if (query.includes('jobs') || query.includes('stats')) {
     return {
       jobs: getJobs(),
@@ -112,7 +120,11 @@ async function dispatchJob(input) {
   }
 
   if (type === 'static') {
-    return callService(`${SERVICE_URLS.static}/scrape`, { url });
+    try {
+      return await callService(`${SERVICE_URLS.static}/scrape`, { url });
+    } catch (_error) {
+      return callService(`${SERVICE_URLS.ai}/scrape/quick`, { url });
+    }
   }
   if (type === 'dynamic') {
     return callService(`${SERVICE_URLS.dynamic}/scrape`, { url, selector });
@@ -177,6 +189,60 @@ async function askQuestion(jobId, question) {
   });
 
   return qaResult;
+}
+
+
+
+async function crawlAndTrainSite(url, maxPages = 25, maxDepth = 2) {
+  if (!url) {
+    throw new Error('url is required');
+  }
+
+  const result = await callService(`${SERVICE_URLS.ai}/site/crawl-and-train`, {
+    url,
+    max_pages: maxPages,
+    max_depth: maxDepth,
+  });
+
+  const pageCount = result?.training?.page_count || 0;
+  const warnings = [];
+  if (result?.blocked_count) {
+    warnings.push(`${result.blocked_count} urls blocked by robots.txt`);
+  }
+  if (result?.failed_count) {
+    warnings.push(`${result.failed_count} urls failed to crawl`);
+  }
+
+  return {
+    engine: result?.engine || 'unknown',
+    pageCount,
+    artifactPath: result?.crawl_file || null,
+    confidence: null,
+    warnings,
+  };
+}
+
+async function askSite(url, question, topK = 3) {
+  if (!url || !question) {
+    throw new Error('url and question are required');
+  }
+
+  const result = await callService(`${SERVICE_URLS.ai}/site/ask`, {
+    url,
+    question,
+    top_k: topK,
+  });
+
+  const citations = Array.isArray(result?.matches)
+    ? result.matches.map((m) => m.url).filter(Boolean)
+    : [];
+
+  return {
+    answer: result?.answer || '',
+    citations,
+    confidence: typeof result?.confidence === 'number' ? result.confidence : null,
+    snippet: result?.matches?.[0]?.snippet || result?.answer || null,
+  };
 }
 
 module.exports = { handleGraphQL, getJobs, getStats };

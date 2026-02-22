@@ -4,13 +4,16 @@ from __future__ import annotations
 
 import os
 from typing import Any
+from urllib.parse import urlparse
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException
 from pydantic import BaseModel, Field, HttpUrl
 
 # Import the new answer_question function
 from app.nlp.processor import analyze_text, answer_question
+from app.nlp.site_qa import SiteKnowledgeBase
 from app.scrapers.basic_scraper import scrape_url
+from app.scrapers.site_crawler import crawl_site, save_crawl
 from celery_worker import celery_app, process_nlp_task, process_quick_scrape_task
 
 app = FastAPI(title="MetaCrawler Python Service", version="1.0.0")
@@ -29,6 +32,28 @@ class ScrapePayload(BaseModel):
 class QAPayload(BaseModel):
     text: str = Field(..., min_length=1)
     question: str = Field(..., min_length=1)
+
+site_kb = SiteKnowledgeBase()
+site_kbs: dict[str, SiteKnowledgeBase] = {}
+
+
+def site_key(url: str) -> str:
+    parsed = urlparse(url)
+    host = parsed.netloc.lower()
+    if host.startswith("www."):
+        host = host[4:]
+    return host
+
+class SiteTrainPayload(BaseModel):
+    url: HttpUrl
+    max_pages: int = Field(default=25, ge=1, le=200)
+    max_depth: int = Field(default=2, ge=0, le=6)
+
+class SiteQuestionPayload(BaseModel):
+    url: HttpUrl
+    question: str = Field(..., min_length=1)
+    top_k: int = Field(default=3, ge=1, le=10)
+
 
 @app.get("/")
 def health_check() -> dict[str, str]:
@@ -80,3 +105,37 @@ def quick_scrape(payload: ScrapePayload, background_tasks: BackgroundTasks) -> d
 @app.post("/qa")
 def qa_endpoint(payload: QAPayload) -> dict[str, Any]:
     return answer_question(payload.text, payload.question)
+
+@app.post("/site/crawl-and-train")
+def crawl_and_train(payload: SiteTrainPayload) -> dict[str, Any]:
+    crawl, engine = crawl_site(str(payload.url), max_pages=payload.max_pages, max_depth=payload.max_depth)
+    crawl_file = save_crawl(str(payload.url), crawl, engine)
+    kb = SiteKnowledgeBase()
+    training = kb.train_from_crawl(crawl_file)
+    site_kbs[site_key(str(payload.url))] = kb
+
+    global site_kb
+    site_kb = kb
+    return {
+        "crawl_file": str(crawl_file),
+        "blocked_count": len(crawl.blocked_urls),
+        "failed_count": len(crawl.failed_urls),
+        "engine": engine,
+        "fallback_order": ["go", "python", "node"],
+        "training": training,
+    }
+
+
+@app.post("/site/ask")
+def ask_site(payload: SiteQuestionPayload) -> dict[str, Any]:
+    key = site_key(str(payload.url))
+    kb = site_kbs.get(key)
+    if kb is None:
+        raise HTTPException(status_code=404, detail="No trained site model found for this URL. Run /site/crawl-and-train first.")
+
+    try:
+        return kb.query(payload.question, top_k=payload.top_k)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to answer site question: {exc}") from exc
