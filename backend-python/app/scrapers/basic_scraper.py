@@ -7,6 +7,8 @@ import urllib.robotparser
 from urllib.parse import urlparse
 from typing import Any
 
+from app.http_client import get_http_session
+
 import requests
 from bs4 import BeautifulSoup
 
@@ -42,7 +44,8 @@ def scrape_url(url: str, selector: str | None = None) -> dict[str, Any]:
         }
 
     try:
-        response = requests.get(
+        session = get_http_session()
+        response = session.get(
             url,
             timeout=DEFAULT_TIMEOUT_SECONDS,
             headers={"User-Agent": USER_AGENT},

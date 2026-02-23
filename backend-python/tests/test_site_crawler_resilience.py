@@ -6,6 +6,7 @@ from app.scrapers import site_crawler
 from app.scrapers.site_crawler import CrawlResult
 
 
+
 @pytest.fixture(autouse=True)
 def clean_site_kbs():
     main.site_kbs.clear()
@@ -23,7 +24,7 @@ def test_crawl_site_go_handles_null_list_fields(monkeypatch):
         def json(self):
             return {"pages": None, "failedUrls": None, "blockedUrls": None}
 
-    monkeypatch.setattr(site_crawler.requests, "post", lambda *args, **kwargs: FakeResponse())
+    monkeypatch.setattr(site_crawler.get_http_session, "post", lambda *args, **kwargs: FakeResponse())
 
     result = site_crawler.crawl_site_go("https://example.com", max_pages=5, max_depth=1)
 

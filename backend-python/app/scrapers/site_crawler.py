@@ -18,6 +18,8 @@ import urllib.robotparser
 import requests
 from bs4 import BeautifulSoup
 
+from app.http_client import get_http_session
+
 USER_AGENT = "MetaCrawler/1.0 (Educational)"
 DEFAULT_TIMEOUT_SECONDS = 15
 DEFAULT_MAX_PAGES = 25
@@ -98,7 +100,8 @@ def _normalize_pages(pages):
 
 def crawl_site_go(seed_url: str, max_pages: int = DEFAULT_MAX_PAGES, max_depth: int = DEFAULT_MAX_DEPTH) -> CrawlResult:
     go_service = os.getenv("GO_SERVICE_URL", "http://go:8080")
-    response = requests.post(
+    session = get_http_session()
+    response = session.post(
         f"{go_service}/crawl",
         json={"url": seed_url, "max_pages": max_pages, "max_depth": max_depth},
         timeout=DEFAULT_TIMEOUT_SECONDS * 4,
@@ -137,7 +140,8 @@ def crawl_site_python(seed_url: str, max_pages: int = DEFAULT_MAX_PAGES, max_dep
             continue
 
         try:
-            response = requests.get(
+            session = get_http_session()
+            response = session.get(
                 current_url,
                 timeout=DEFAULT_TIMEOUT_SECONDS,
                 headers={"User-Agent": USER_AGENT},
@@ -178,6 +182,7 @@ def crawl_site_node(seed_url: str, max_pages: int = DEFAULT_MAX_PAGES, max_depth
     node_service = os.getenv("NODE_SERVICE_URL", "http://node:3000")
     robot_parser = _build_robot_parser(seed_url)
     root_domain = _domain_from_url(seed_url)
+    session = get_http_session()
 
     queue: deque[tuple[str, int]] = deque([(seed_url, 0)])
     visited: set[str] = set()
@@ -196,7 +201,8 @@ def crawl_site_node(seed_url: str, max_pages: int = DEFAULT_MAX_PAGES, max_depth
             continue
 
         try:
-            response = requests.post(
+            
+            response = session.post(
                 f"{node_service}/scrape",
                 json={"url": current_url},
                 timeout=DEFAULT_TIMEOUT_SECONDS * 4,
@@ -230,7 +236,7 @@ def crawl_site_node(seed_url: str, max_pages: int = DEFAULT_MAX_PAGES, max_depth
 
         # Use lightweight HTML fetch for link discovery only.
         try:
-            html_response = requests.get(current_url, timeout=DEFAULT_TIMEOUT_SECONDS, headers={"User-Agent": USER_AGENT})
+            html_response = session.get(current_url, timeout=DEFAULT_TIMEOUT_SECONDS, headers={"User-Agent": USER_AGENT})
             html_response.raise_for_status()
             soup = BeautifulSoup(html_response.text, "html.parser")
         except requests.RequestException:
