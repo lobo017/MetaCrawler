@@ -1,19 +1,48 @@
 'use client';
+
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Bot, X, Send } from 'lucide-react';
+
+const backdropVariants = {
+  hidden: { opacity: 0 },
+  visible: { opacity: 1, transition: { duration: 0.25 } },
+  exit: { opacity: 0, transition: { duration: 0.2, delay: 0.05 } },
+};
+
+const panelVariants = {
+  hidden: { opacity: 0, scale: 0.96, y: 12 },
+  visible: {
+    opacity: 1,
+    scale: 1,
+    y: 0,
+    transition: { duration: 0.35, ease: [0.16, 1, 0.3, 1] },
+  },
+  exit: {
+    opacity: 0,
+    scale: 0.97,
+    y: 8,
+    transition: { duration: 0.2, ease: [0.16, 1, 0.3, 1] },
+  },
+};
+
+const messageVariant = {
+  hidden: { opacity: 0, y: 6, scale: 0.98 },
+  visible: { opacity: 1, y: 0, scale: 1, transition: { duration: 0.3, ease: [0.16, 1, 0.3, 1] } },
+};
 
 export default function ChatModal({ job, onClose }) {
   const isSiteMode = job.type.startsWith('site');
-  
+
   const [messages, setMessages] = useState([
-    { role: 'bot', text: `I have analyzed ${isSiteMode ? 'the site corpus for' : 'the content from'} ${job.url}. Ask me anything!` }
+    { role: 'bot', text: `I have analyzed ${isSiteMode ? 'the site corpus for' : 'the content from'} ${job.url}. Ask me anything.` }
   ]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const scrollRef = useRef(null);
   const inputRef = useRef(null);
-  const modalRef = useRef(null);
 
-  // Fetch chat history from MongoDB when modal opens
+  /* ── Load saved chat history ── */
   useEffect(() => {
     const loadHistory = async () => {
       const query = `
@@ -32,7 +61,7 @@ export default function ChatModal({ job, onClose }) {
         });
         const body = await res.json();
         const history = body.data?.getChatHistory;
-        
+
         if (history && history.length > 0) {
           setMessages(history);
         }
@@ -123,46 +152,88 @@ export default function ChatModal({ job, onClose }) {
   };
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in"
+    <motion.div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
       onClick={handleBackdropClick}
       role="dialog"
       aria-modal="true"
+      variants={backdropVariants}
+      initial="hidden"
+      animate="visible"
+      exit="exit"
     >
-      <div className="glass-panel w-full max-w-lg flex flex-col overflow-hidden h-[600px] shadow-2xl animate-fade-in-up">
-        <div className="p-4 border-b border-white/10 flex justify-between items-center bg-white/5">
-          <div>
-            <h3 className="font-bold text-white flex items-center gap-2">
-              <span aria-hidden="true">🤖</span> Data Q&A Bot
-            </h3>
-            <p className="text-xs text-slate-400 truncate max-w-[300px]" title={job.url}>{job.url}</p>
+      <motion.div
+        className="glass-panel w-full max-w-lg flex flex-col overflow-hidden h-[600px]"
+        variants={panelVariants}
+        initial="hidden"
+        animate="visible"
+        exit="exit"
+      >
+        {/* Header */}
+        <div className="p-4 border-b border-white/[0.06] flex justify-between items-center">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg bg-blue-500/10 border border-blue-500/15 flex items-center justify-center">
+              <Bot className="w-4 h-4 text-blue-400" />
+            </div>
+            <div>
+              <h3 className="text-sm font-semibold text-white">Data Q&A</h3>
+              <p className="text-[11px] text-slate-500 truncate max-w-[280px]" title={job.url}>{job.url}</p>
+            </div>
           </div>
-          <button onClick={onClose} className="text-slate-400 hover:text-white w-8 h-8 flex items-center justify-center rounded-lg hover:bg-white/10 active:scale-90">✕</button>
+          <button
+            onClick={onClose}
+            aria-label="Close dialog"
+            className="text-slate-500 hover:text-slate-300 w-8 h-8 flex items-center justify-center rounded-lg
+                       hover:bg-white/[0.05] transition-all duration-200"
+          >
+            <X className="w-4 h-4" />
+          </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-4 space-y-4">
-          {messages.map((msg, i) => (
-            <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} animate-fade-in`} style={{ animationDelay: `${i * 30}ms` }}>
-              <div className={`max-w-[80%] p-3 rounded-xl text-sm leading-relaxed ${msg.role === 'user' ? 'bg-blue-600 text-white rounded-br-none' : 'bg-slate-800 text-slate-200 border border-white/5 rounded-bl-none'}`}>
-                {msg.text}
-              </div>
-            </div>
-          ))}
+        {/* Messages */}
+        <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
+          <AnimatePresence initial={false}>
+            {messages.map((msg, i) => (
+              <motion.div
+                key={i}
+                className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
+                variants={messageVariant}
+                initial="hidden"
+                animate="visible"
+              >
+                <div
+                  className={`max-w-[80%] px-3.5 py-2.5 text-[13px] leading-relaxed ${msg.role === 'user'
+                      ? 'bg-blue-600 text-white rounded-2xl rounded-br-md'
+                      : 'bg-white/[0.04] text-slate-300 border border-white/[0.06] rounded-2xl rounded-bl-md'
+                    }`}
+                >
+                  {msg.text}
+                </div>
+              </motion.div>
+            ))}
+          </AnimatePresence>
+
           {loading && (
-            <div className="flex justify-start animate-fade-in">
-              <div className="bg-slate-800 p-3 rounded-xl rounded-bl-none border border-white/5">
+            <motion.div
+              className="flex justify-start"
+              variants={messageVariant}
+              initial="hidden"
+              animate="visible"
+            >
+              <div className="bg-white/[0.04] px-4 py-3 rounded-2xl rounded-bl-md border border-white/[0.06]">
                 <div className="flex space-x-1.5">
-                  <div className="w-2 h-2 bg-slate-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                  <div className="w-2 h-2 bg-slate-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                  <div className="w-2 h-2 bg-slate-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                  <span className="w-1.5 h-1.5 bg-slate-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                  <span className="w-1.5 h-1.5 bg-slate-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                  <span className="w-1.5 h-1.5 bg-slate-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
                 </div>
               </div>
-            </div>
+            </motion.div>
           )}
           <div ref={scrollRef} />
         </div>
 
-        <form onSubmit={handleSend} className="p-4 border-t border-white/10 bg-white/5">
+        {/* Input */}
+        <form onSubmit={handleSend} className="p-4 border-t border-white/[0.06]">
           <div className="flex gap-2">
             <input
               ref={inputRef}
@@ -174,10 +245,20 @@ export default function ChatModal({ job, onClose }) {
               disabled={loading}
               autoComplete="off"
             />
-            <button type="submit" disabled={loading || !input.trim()} className="bg-blue-600 hover:bg-blue-500 text-white px-5 rounded-lg font-medium transition-all duration-200 disabled:opacity-50">Send</button>
+            <motion.button
+              type="submit"
+              disabled={loading || !input.trim()}
+              className="bg-blue-600 hover:bg-blue-500 text-white px-4 rounded-xl font-medium
+                         transition-colors duration-200 disabled:opacity-40 disabled:cursor-not-allowed
+                         flex items-center justify-center"
+              whileHover={!loading && input.trim() ? { scale: 1.03 } : {}}
+              whileTap={!loading && input.trim() ? { scale: 0.97 } : {}}
+            >
+              <Send className="w-4 h-4" />
+            </motion.button>
           </div>
         </form>
-      </div>
-    </div>
+      </motion.div>
+    </motion.div>
   );
 }

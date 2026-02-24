@@ -1,13 +1,24 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { motion } from 'framer-motion';
+import { Package, CheckCircle2 } from 'lucide-react';
+
+const fadeUp = {
+  hidden: { opacity: 0, y: 10 },
+  visible: { opacity: 1, y: 0, transition: { duration: 0.4, ease: [0.16, 1, 0.3, 1] } },
+};
+
+const stagger = {
+  hidden: {},
+  visible: { transition: { staggerChildren: 0.06 } },
+};
 
 export default function AnalyticsChart({ stats }) {
   const [mounted, setMounted] = useState(false);
 
-  // Trigger bar animations after mount
   useEffect(() => {
-    const timer = setTimeout(() => setMounted(true), 100);
+    const timer = setTimeout(() => setMounted(true), 150);
     return () => clearTimeout(timer);
   }, []);
 
@@ -16,11 +27,28 @@ export default function AnalyticsChart({ stats }) {
     : 0;
 
   return (
-    <div className="space-y-6" role="region" aria-label="Job statistics">
+    <motion.div
+      className="space-y-6"
+      role="region"
+      aria-label="Job statistics"
+      variants={stagger}
+      initial="hidden"
+      animate="visible"
+    >
       {/* Top Cards */}
-      <div className="grid grid-cols-2 gap-4 stagger-children">
-        <StatCard label="Total Jobs" value={stats.totalJobs} icon="📦" />
-        <StatCard label="Success Rate" value={`${successRate}%`} icon="✅" />
+      <div className="grid grid-cols-2 gap-4">
+        <StatCard
+          label="Total Jobs"
+          value={stats.totalJobs}
+          icon={Package}
+          accentColor="blue"
+        />
+        <StatCard
+          label="Success Rate"
+          value={`${successRate}%`}
+          icon={CheckCircle2}
+          accentColor="emerald"
+        />
       </div>
 
       {/* Progress Bars */}
@@ -30,7 +58,6 @@ export default function AnalyticsChart({ stats }) {
           value={stats.queuedJobs}
           total={stats.totalJobs}
           color="bg-amber-400"
-          track="bg-slate-800"
           animated={mounted}
         />
         <MetricBar
@@ -38,7 +65,6 @@ export default function AnalyticsChart({ stats }) {
           value={stats.doneJobs}
           total={stats.totalJobs}
           color="bg-emerald-500"
-          track="bg-slate-800"
           animated={mounted}
         />
         <MetricBar
@@ -46,48 +72,65 @@ export default function AnalyticsChart({ stats }) {
           value={stats.failedJobs}
           total={stats.totalJobs}
           color="bg-rose-500"
-          track="bg-slate-800"
           animated={mounted}
         />
       </div>
-    </div>
+    </motion.div>
   );
 }
 
-function StatCard({ label, value, icon }) {
+const accentMap = {
+  blue: { bg: 'bg-blue-500/10', border: 'border-blue-500/15', text: 'text-blue-400' },
+  emerald: { bg: 'bg-emerald-500/10', border: 'border-emerald-500/15', text: 'text-emerald-400' },
+  cyan: { bg: 'bg-cyan-500/10', border: 'border-cyan-500/15', text: 'text-cyan-400' },
+};
+
+function StatCard({ label, value, icon: Icon, accentColor = 'blue' }) {
+  const accent = accentMap[accentColor] || accentMap.blue;
+
   return (
-    <div className="glass-panel bg-black/20 p-4 border-white/5 flex flex-col justify-between h-24 animate-fade-in-up">
+    <motion.div
+      className="glass-panel bg-black/20 p-4 border-white/[0.04] flex flex-col justify-between h-24"
+      variants={fadeUp}
+    >
       <div className="flex items-center justify-between">
-        <p className="text-[10px] uppercase tracking-wider text-slate-500 font-bold">{label}</p>
-        <span className="text-lg" aria-hidden="true">{icon}</span>
+        <p className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold">{label}</p>
+        <div className={`w-7 h-7 rounded-lg ${accent.bg} border ${accent.border} flex items-center justify-center`}>
+          <Icon className={`w-3.5 h-3.5 ${accent.text}`} />
+        </div>
       </div>
-      <p className="text-3xl font-bold tracking-tight text-white" aria-label={`${label}: ${value}`}>
+      <p
+        className="text-3xl font-bold tracking-tight text-white tabular-nums"
+        aria-label={`${label}: ${value}`}
+      >
         {value}
       </p>
-    </div>
+    </motion.div>
   );
 }
 
-function MetricBar({ label, value, total, color, track, animated }) {
+function MetricBar({ label, value, total, color, animated }) {
   const width = total > 0 ? Math.min(100, Math.round((value / total) * 100)) : 0;
 
   return (
     <div className="space-y-2" role="listitem">
       <div className="flex justify-between text-[11px] font-medium text-slate-400">
         <span>{label}</span>
-        <span className="text-slate-200 font-mono">{value}</span>
+        <span className="text-slate-200 font-mono tabular-nums">{value}</span>
       </div>
       <div
-        className={`h-2 w-full ${track} rounded-full overflow-hidden`}
+        className="h-1.5 w-full bg-white/[0.04] rounded-full overflow-hidden"
         role="progressbar"
         aria-label={`${label}: ${value} of ${total}`}
         aria-valuenow={value}
         aria-valuemin={0}
         aria-valuemax={total}
       >
-        <div
-          className={`h-full ${color} rounded-full transition-all duration-1000 ease-out`}
-          style={{ width: animated ? `${width}%` : '0%' }}
+        <motion.div
+          className={`h-full ${color} rounded-full`}
+          initial={{ width: '0%' }}
+          animate={{ width: animated ? `${width}%` : '0%' }}
+          transition={{ duration: 1.2, ease: [0.16, 1, 0.3, 1], delay: 0.2 }}
         />
       </div>
     </div>

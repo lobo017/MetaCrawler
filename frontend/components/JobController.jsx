@@ -1,13 +1,27 @@
 'use client';
 
 import { useState } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Info, Loader2 } from 'lucide-react';
+
+const smoothReveal = {
+  initial: { opacity: 0, height: 0, marginTop: 0 },
+  animate: { opacity: 1, height: 'auto', marginTop: 16, transition: { duration: 0.35, ease: [0.16, 1, 0.3, 1] } },
+  exit: { opacity: 0, height: 0, marginTop: 0, transition: { duration: 0.25, ease: [0.16, 1, 0.3, 1] } },
+};
+
+const toastVariant = {
+  initial: { opacity: 0, y: -6, scale: 0.98 },
+  animate: { opacity: 1, y: 0, scale: 1, transition: { duration: 0.3, ease: [0.16, 1, 0.3, 1] } },
+  exit: { opacity: 0, y: -4, scale: 0.98, transition: { duration: 0.2 } },
+};
 
 export default function JobController({ onCreated }) {
   const [url, setUrl] = useState('');
   const [type, setType] = useState('auto');
   const [text, setText] = useState('');
   const [status, setStatus] = useState('');
-  const [statusType, setStatusType] = useState('info'); // 'info' | 'success' | 'error'
+  const [statusType, setStatusType] = useState('info');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const handleSubmit = async (event) => {
@@ -57,7 +71,7 @@ export default function JobController({ onCreated }) {
     <form onSubmit={handleSubmit} className="space-y-5" aria-label="Scraping job configuration">
       {/* URL Input */}
       <div>
-        <label htmlFor="target-url" className="mb-2 block text-xs font-bold text-slate-500 uppercase tracking-wider">
+        <label htmlFor="target-url" className="mb-2 block text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
           Target URL
         </label>
         <input
@@ -75,7 +89,7 @@ export default function JobController({ onCreated }) {
 
       {/* Scraper Type Selector */}
       <div>
-        <label htmlFor="scraper-type" className="mb-2 block text-xs font-bold text-slate-500 uppercase tracking-wider">
+        <label htmlFor="scraper-type" className="mb-2 block text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
           Scraper Type
         </label>
         <select
@@ -85,79 +99,103 @@ export default function JobController({ onCreated }) {
           className="input-dark w-full text-sm cursor-pointer"
           aria-describedby="type-hint"
         >
-          <option value="auto">⚡ Auto • Let MetaCrawler choose</option>
-          <option value="site">🕸️ Full Site Knowledge Base (Crawl & Train)</option>
-          <option value="static">🏗️ Go (Static HTML)</option>
-          <option value="dynamic">🌐 Node.js (Dynamic / SPA)</option>
-          <option value="ai">🤖 Python (AI / NLP)</option>
+          <option value="auto">Auto — Smart Routing</option>
+          <option value="site">Full Site Knowledge Base (Crawl and Train)</option>
+          <option value="static">Go (Static HTML)</option>
+          <option value="dynamic">Node.js (Dynamic / SPA)</option>
+          <option value="ai">Python (AI / NLP)</option>
         </select>
         <p id="type-hint" className="sr-only">Select which scraping engine to use, or choose Auto for smart routing</p>
       </div>
 
-      {/* Auto mode info card */}
-      {type === 'auto' && (
-        <div
-          className="p-3 rounded-lg border border-blue-500/30 bg-blue-500/10 text-[11px] text-blue-200 flex items-start gap-2 animate-slide-down"
-          role="note"
-        >
-          <span className="text-blue-400 text-lg leading-none" aria-hidden="true">ℹ</span>
-          <p>Auto mode analyzes the target website and chooses <span className="font-bold text-white">Static</span> or <span className="font-bold text-white">Dynamic</span> scraper at runtime.</p>
-        </div>
-      )}
+      {/* Conditional Panels with smooth height animation */}
+      <AnimatePresence mode="wait">
+        {type === 'auto' && (
+          <motion.div
+            key="auto-info"
+            variants={smoothReveal}
+            initial="initial"
+            animate="animate"
+            exit="exit"
+            className="overflow-hidden"
+          >
+            <div
+              className="p-3.5 rounded-lg border border-blue-500/15 bg-blue-500/6 text-[11px] text-blue-200/80 flex items-start gap-2.5"
+              role="note"
+            >
+              <Info className="w-4 h-4 text-blue-400 shrink-0 mt-0.5" />
+              <p className="leading-relaxed">
+                Auto mode analyzes the target and routes to either <span className="font-semibold text-white">Static</span> or <span className="font-semibold text-white">Dynamic</span> scraper at runtime.
+              </p>
+            </div>
+          </motion.div>
+        )}
 
-      {/* AI text input */}
-      {type === 'ai' && (
-        <div className="animate-slide-down">
-          <label htmlFor="nlp-text" className="mb-2 block text-xs font-bold text-slate-500 uppercase tracking-wider">
-            Text for NLP (optional)
-          </label>
-          <textarea
-            id="nlp-text"
-            value={text}
-            onChange={(event) => setText(event.target.value)}
-            className="input-dark w-full min-h-[100px] text-sm resize-y"
-            placeholder="Enter text to analyze with NLP. If blank, the URL content will be used."
-            aria-describedby="nlp-hint"
-          />
-          <p id="nlp-hint" className="sr-only">Enter text to analyze with NLP. If blank, the URL content will be used.</p>
-        </div>
-      )}
+        {type === 'ai' && (
+          <motion.div
+            key="ai-input"
+            variants={smoothReveal}
+            initial="initial"
+            animate="animate"
+            exit="exit"
+            className="overflow-hidden"
+          >
+            <label htmlFor="nlp-text" className="mb-2 block text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
+              Text for NLP (optional)
+            </label>
+            <textarea
+              id="nlp-text"
+              value={text}
+              onChange={(event) => setText(event.target.value)}
+              className="input-dark w-full min-h-[100px] text-sm resize-y"
+              placeholder="Enter text to analyze with NLP. If blank, the URL content will be used."
+              aria-describedby="nlp-hint"
+            />
+            <p id="nlp-hint" className="sr-only">Enter text to analyze with NLP. If blank, the URL content will be used.</p>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Submit Button */}
-      <button
+      <motion.button
         type="submit"
         disabled={isSubmitting}
         aria-busy={isSubmitting}
-        className={`w-full py-3 px-4 rounded-lg font-bold text-white text-sm transition-all duration-300
-                   bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 
-                   shadow-[0_0_20px_rgba(59,130,246,0.3)] border border-white/10 
-                   active:scale-[0.97] hover:shadow-[0_0_30px_rgba(59,130,246,0.4)]
-                   disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100
-                   flex items-center justify-center gap-2`}
+        className={`w-full py-3 px-4 rounded-xl font-semibold text-white text-sm
+                   bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-400
+                   border border-white/[0.08] shadow-lg shadow-blue-500/10
+                   disabled:opacity-50 disabled:cursor-not-allowed
+                   flex items-center justify-center gap-2.5 transition-all duration-300`}
+        whileHover={!isSubmitting ? { scale: 1.01, boxShadow: '0 8px 24px -4px rgba(59, 130, 246, 0.25)' } : {}}
+        whileTap={!isSubmitting ? { scale: 0.98 } : {}}
       >
         {isSubmitting ? (
           <>
-            <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24" aria-hidden="true">
-              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-            </svg>
+            <Loader2 className="w-4 h-4 animate-spin" />
             Processing...
           </>
         ) : (
           'Start Scraping Job'
         )}
-      </button>
+      </motion.button>
 
       {/* Status Toast */}
-      {status && (
-        <div
-          className={`toast toast-${statusType} animate-slide-down`}
-          role="status"
-          aria-live="polite"
-        >
-          {status}
-        </div>
-      )}
+      <AnimatePresence mode="wait">
+        {status && (
+          <motion.div
+            key={status}
+            className={`toast toast-${statusType}`}
+            role="status"
+            aria-live="polite"
+            variants={toastVariant}
+            initial="initial"
+            animate="animate"
+            exit="exit"
+          >
+            {status}
+          </motion.div>
+        )}
+      </AnimatePresence>
     </form>
   );
 }
