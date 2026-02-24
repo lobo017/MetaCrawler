@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import os
 from typing import Any
-from urllib.parse import urlparse
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException
 from pydantic import BaseModel, Field, HttpUrl
@@ -28,21 +27,11 @@ class ScrapePayload(BaseModel):
     selector: str | None = None
     async_task: bool = False
 
-# New Payload for QA
+# Payload for QA
 class QAPayload(BaseModel):
     text: str = Field(..., min_length=1)
     question: str = Field(..., min_length=1)
-
-site_kb = SiteKnowledgeBase()
-site_kbs: dict[str, SiteKnowledgeBase] = {}
-
-
-def site_key(url: str) -> str:
-    parsed = urlparse(url)
-    host = parsed.netloc.lower()
-    if host.startswith("www."):
-        host = host[4:]
-    return host
+    history: list[dict[str, str]] = []
 
 class SiteTrainPayload(BaseModel):
     url: HttpUrl
@@ -53,6 +42,7 @@ class SiteQuestionPayload(BaseModel):
     url: HttpUrl
     question: str = Field(..., min_length=1)
     top_k: int = Field(default=3, ge=1, le=10)
+    history: list[dict[str, str]] = []
 
 
 @app.get("/")
@@ -101,21 +91,19 @@ def quick_scrape(payload: ScrapePayload, background_tasks: BackgroundTasks) -> d
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-# New Endpoint
 @app.post("/qa")
 def qa_endpoint(payload: QAPayload) -> dict[str, Any]:
-    return answer_question(payload.text, payload.question)
+    return answer_question(payload.text, payload.question, payload.history)
 
 @app.post("/site/crawl-and-train")
 def crawl_and_train(payload: SiteTrainPayload) -> dict[str, Any]:
     crawl, engine = crawl_site(str(payload.url), max_pages=payload.max_pages, max_depth=payload.max_depth)
     crawl_file = save_crawl(str(payload.url), crawl, engine)
-    kb = SiteKnowledgeBase()
+    
+    # Instantiate KB with the URL, it automatically connects to the Chroma DB collection
+    kb = SiteKnowledgeBase(str(payload.url))
     training = kb.train_from_crawl(crawl_file)
-    site_kbs[site_key(str(payload.url))] = kb
-
-    global site_kb
-    site_kb = kb
+    
     return {
         "crawl_file": str(crawl_file),
         "blocked_count": len(crawl.blocked_urls),
@@ -128,14 +116,10 @@ def crawl_and_train(payload: SiteTrainPayload) -> dict[str, Any]:
 
 @app.post("/site/ask")
 def ask_site(payload: SiteQuestionPayload) -> dict[str, Any]:
-    key = site_key(str(payload.url))
-    kb = site_kbs.get(key)
-    if kb is None:
-        raise HTTPException(status_code=404, detail="No trained site model found for this URL. Run /site/crawl-and-train first.")
-
+    kb = SiteKnowledgeBase(str(payload.url))
+    if kb.collection.count() == 0:
+        raise HTTPException(status_code=404, detail="No trained site model found for this URL.")
     try:
-        return kb.query(payload.question, top_k=payload.top_k)
-    except HTTPException:
-        raise
+        return kb.query(payload.question, top_k=payload.top_k, history=payload.history)
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Failed to answer site question: {exc}") from exc
+        raise HTTPException(status_code=500, detail=f"Failed to answer: {exc}") from exc

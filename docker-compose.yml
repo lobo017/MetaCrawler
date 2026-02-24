@@ -3,6 +3,8 @@ services:
     build: ./backend-python
     ports:
       - '8000:8000'
+    volumes:
+      - ./backend-python/data:/app/data
     environment:
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
@@ -23,6 +25,13 @@ services:
     ports:
       - '3000:3000'
 
+  mongo:
+    image: mongo:7.0
+    ports:
+      - '27017:27017'
+    volumes:
+      - ./data/mongo:/data/db
+
   gateway:
     build: ./api-gateway
     ports:
@@ -31,10 +40,12 @@ services:
       - GO_SERVICE_URL=http://go:8080
       - NODE_SERVICE_URL=http://node:3000
       - PYTHON_SERVICE_URL=http://python:8000
+      - MONGO_URI=mongodb://mongo:27017/metacrawler
     depends_on:
       - python
       - go
       - node
+      - mongo
 
   frontend:
     build: ./frontend

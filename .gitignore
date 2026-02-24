@@ -73,3 +73,8 @@ Thumbs.db
 *.pem
 .vercel
 scripts/
+*.bat
+
+# ignore generated data
+/data/
+data/

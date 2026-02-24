@@ -144,70 +144,49 @@ def _question_type_boost(q_type: str, sentences: list[str]) -> np.ndarray:
 #   4. Paragraph Chunking — score overlapping 3-sentence windows
 # ---------------------------------------------------------------------------
 
-def answer_question(text: str, question: str) -> dict[str, Any]:
-    """
-    Conceptual QA engine.
+# Add this import at the very top of processor.py if it isn't there:
+from app.nlp.site_qa import _get_llm
 
-    Combines four NLP strategies to find the best answer *by meaning*, not
-    just literal word overlap:
-      1. Synonym Expansion  — widens the query vocabulary
-      2. Question-Type Scoring — boosts sentences matching the intent
-      3. N-gram TF-IDF (bigrams) — captures multi-word concepts
-      4. Paragraph Chunking — scores 3-sentence windows for richer context
+def answer_question(text: str, question: str, history: list[dict[str, str]] | None = None) -> dict[str, Any]:
     """
+    Finds the most relevant chunk in a single document and uses Qwen LLM to answer.
+    """
+    if history is None:
+        history = []
+
     if not text or not question:
         return {"answer": "I need content to analyze first.", "confidence": 0.0}
 
-    # ---- Sentence splitting (same robust regex as before) ----
+    # ---- 1. RETRIEVE: Find the best paragraph (using existing logic) ----
     raw_sentences = re.split(r'(?<!\w\.\w.)(?<![A-Z][a-z]\.)(?<=\.|\?|\!)\s', text)
     sentences = [s.strip() for s in raw_sentences if len(s.strip()) > 15]
 
     if not sentences:
         return {"answer": "Not enough meaningful content found.", "confidence": 0.0}
 
-    # ---- Concept 4: Paragraph Chunking ----
-    # Build overlapping 3-sentence windows so the model scores coherent
-    # paragraphs, not isolated sentences.
     WINDOW = 3
     chunks: list[str] = []
-    chunk_indices: list[tuple[int, int]] = []  # (start_idx, end_idx) into sentences
+    chunk_indices: list[tuple[int, int]] = []
     for i in range(len(sentences)):
         end = min(i + WINDOW, len(sentences))
         chunk = " ".join(sentences[i:end])
         chunks.append(chunk)
         chunk_indices.append((i, end - 1))
 
-    # ---- Concept 1: Synonym Expansion ----
     expanded_question = _expand_with_synonyms(question)
 
-    # ---- Concept 3: N-gram TF-IDF (bigrams) ----
     try:
-        vectorizer = TfidfVectorizer(
-            stop_words="english",
-            ngram_range=(1, 2),   # unigrams + bigrams
-            max_features=10000,
-        )
+        vectorizer = TfidfVectorizer(stop_words="english", ngram_range=(1, 2), max_features=10000)
         tfidf_matrix = vectorizer.fit_transform([expanded_question] + chunks)
         cosine_sims = cosine_similarity(tfidf_matrix[0:1], tfidf_matrix[1:]).flatten()
     except ValueError:
         cosine_sims = np.zeros(len(chunks))
 
-    # ---- Concept 2: Question-Type Scoring ----
     q_type = _classify_question(question)
-    # Compute per-sentence boosts, then max-pool into chunk-level boosts
     sent_boosts = _question_type_boost(q_type, sentences)
-    chunk_type_boosts = np.array([
-        float(np.max(sent_boosts[start : end + 1]))
-        for start, end in chunk_indices
-    ])
+    chunk_type_boosts = np.array([float(np.max(sent_boosts[start : end + 1])) for start, end in chunk_indices])
 
-    # ---- Keyword overlap (retained as a safety net) ----
-    stop_words = {"what", "where", "how", "who", "when", "why", "is", "the",
-                  "a", "an", "are", "was", "were", "do", "does", "did", "can",
-                  "could", "should", "would", "it", "its", "this", "that", "of",
-                  "in", "on", "for", "to", "and", "or"}
-    q_tokens = set(re.findall(r"\w+", question.lower())) - stop_words
-    # Also include synonym-expanded tokens
+    stop_words = {"what", "where", "how", "who", "when", "why", "is", "the", "a", "an", "are", "was", "were", "do", "does", "did", "can", "could", "should", "would", "it", "its", "this", "that", "of", "in", "on", "for", "to", "and", "or"}
     expanded_q_tokens = set(re.findall(r"\w+", expanded_question.lower())) - stop_words
     overlap_scores = np.zeros(len(chunks))
     for i, chunk in enumerate(chunks):
@@ -215,13 +194,7 @@ def answer_question(text: str, question: str) -> dict[str, Any]:
         if expanded_q_tokens:
             overlap_scores[i] = len(expanded_q_tokens & c_tokens) / len(expanded_q_tokens)
 
-    # ---- Blend all signals ----
-    final_scores = (
-        cosine_sims       * 0.45 +   # Concept 1+3: synonym-expanded bigram TF-IDF
-        overlap_scores    * 0.25 +   # Safety-net keyword overlap
-        chunk_type_boosts * 0.30     # Concept 2: question-type boost
-    )
-
+    final_scores = (cosine_sims * 0.45) + (overlap_scores * 0.25) + (chunk_type_boosts * 0.30)
     best_idx = int(np.argmax(final_scores))
     best_score = float(final_scores[best_idx])
 
@@ -231,50 +204,99 @@ def answer_question(text: str, question: str) -> dict[str, Any]:
             "confidence": round(best_score, 2),
         }
 
-    # ---- Build the answer from the winning chunk ----
     start_s, end_s = chunk_indices[best_idx]
-    key_sentence = sentences[start_s]  # highlight the lead sentence
-    context_parts = sentences[start_s : end_s + 1]
-    # Bold the key sentence in the output
-    full_answer = " ".join(
-        f"**{s}**" if s == key_sentence else s for s in context_parts
-    ).strip()
+    best_snippet = " ".join(sentences[start_s : end_s + 1]).strip()
+
+    # ---- 2. GENERATE: Pass the best snippet to the LLM ----
+    generator = _get_llm()
+    messages = [
+        {
+            "role": "system", 
+            "content": (
+                "You are an expert data analyst. Your goal is maximum usefulness per word. "
+                "Answer the user's question directly and accurately using ONLY the provided context. "
+                "Follow these rules: "
+                "1. If the context lacks the answer, state: 'I cannot answer this based on the scraped data.' "
+                "2. Do not hallucinate or use outside knowledge. "
+                "3. Use clear headings and bullet points if helpful. "
+                "4. Be concise and avoid filler."
+            )
+        }
+    ]
+
+    # Inject conversational memory
+    for msg in history[-4:]:
+        role = "assistant" if msg.get("role") == "bot" else "user"
+        messages.append({"role": role, "content": msg.get("text", "")})
+
+    messages.append({"role": "user", "content": f"Context: {best_snippet}\n\nQuestion: {question}"})
+    
+    prompt = generator.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+    outputs = generator(prompt, max_new_tokens=150, do_sample=False)
+    generated_answer = outputs[0]["generated_text"][len(prompt):].strip()
 
     return {
-        "answer": full_answer,
+        "answer": generated_answer,
         "confidence": round(best_score, 2),
-        "method": "conceptual_qa_v2",
+        "method": "qwen_2.5_single_page_rag",
         "question_type": q_type,
     }
-
 # --- Keep existing helper functions (_analyze_sentiment, etc.) unchanged below ---
-def _analyze_sentiment(text: str) -> dict[str, float]:
-    tokens = [token.lower() for token in re.findall(r"[A-Za-z]+", text)]
-    if not tokens:
-        return {"polarity": 0.0, "subjectivity": 0.0}
+# --- HUGGING FACE PIPELINES ---
+_sentiment_pipe = None
+_ner_pipe = None
 
-    pos_hits = sum(token in POSITIVE_WORDS for token in tokens)
-    neg_hits = sum(token in NEGATIVE_WORDS for token in tokens)
+def _analyze_sentiment(text: str) -> dict[str, Any]:
+    global _sentiment_pipe
+    if _sentiment_pipe is None:
+        from transformers import pipeline
+        # Fast, standard model for sentiment
+        _sentiment_pipe = pipeline("sentiment-analysis", model="distilbert/distilbert-base-uncased-finetuned-sst-2-english")
 
-    polarity = (pos_hits - neg_hits) / max(len(tokens), 1)
-    subjectivity = (pos_hits + neg_hits) / max(len(tokens), 1)
-    return {"polarity": round(polarity, 4), "subjectivity": round(subjectivity, 4)}
-
+    # NLP models have a 512 token limit. We truncate to ~1500 chars to be safe.
+    safe_text = text[:1500]
+    
+    # Returns e.g. [{'label': 'POSITIVE', 'score': 0.99}]
+    result = _sentiment_pipe(safe_text)[0] 
+    
+    polarity = 1.0 if result["label"] == "POSITIVE" else -1.0
+    confidence = float(result["score"])
+    
+    return {
+        "label": result["label"],
+        "polarity": round(polarity * confidence, 4),
+        "confidence": round(confidence, 4)
+    }
 
 def _extract_entities(text: str) -> list[dict[str, str]]:
-    candidates = re.findall(r"\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\b", text)
-    seen = set()
+    global _ner_pipe
+    if _ner_pipe is None:
+        from transformers import pipeline
+        # aggregation_strategy="simple" merges multi-word entities (like "New York") into one
+        _ner_pipe = pipeline("ner", model="dslim/bert-base-NER", aggregation_strategy="simple")
+
+    safe_text = text[:1500]
+    results = _ner_pipe(safe_text)
+    
     entities = []
-    for candidate in candidates:
-        normalized = candidate.strip()
-        if len(normalized) < 2 or normalized in seen:
-            continue
-        seen.add(normalized)
-        entities.append({"text": normalized, "label": "PROPN"})
-    return entities
+    for ent in results:
+        entities.append({
+            "text": ent["word"],
+            "label": ent["entity_group"], # e.g., PER, ORG, LOC, MISC
+            "confidence": round(float(ent["score"]), 4)
+        })
+    
+    # Remove duplicates, keeping the highest confidence version
+    unique_ents = {}
+    for e in entities:
+        if e["text"] not in unique_ents or e["confidence"] > unique_ents[e["text"]]["confidence"]:
+            unique_ents[e["text"]] = e
+            
+    return list(unique_ents.values())
 
 
 def _extract_keywords(text: str, limit: int = 8) -> list[str]:
+    # (Keep your existing keyword extraction function here)
     tokens = [token.lower() for token in re.findall(r"[A-Za-z]{4,}", text)]
     stopwords = {"that", "with", "from", "this", "have", "were", "your", "about", "http", "https"}
     filtered = [token for token in tokens if token not in stopwords]

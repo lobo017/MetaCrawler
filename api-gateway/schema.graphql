@@ -1,3 +1,24 @@
+type Job {
+  id: String!
+  url: String!
+  type: String!
+  status: String!
+  result: String
+  createdAt: String!
+}
+
+type Stats {
+  totalJobs: Int!
+  queuedJobs: Int!
+  doneJobs: Int!
+  failedJobs: Int!
+}
+
+type ChatMessage {
+  role: String!
+  text: String!
+}
+
 type SiteTrainResult {
   engine: String!
   pageCount: Int!
@@ -13,10 +34,22 @@ type SiteAskResult {
   snippet: String
 }
 
+input CreateJobInput {
+  url: String!
+  type: String!
+  text: String
+  selector: String
+}
+
 type Query {
-  askSite(url: String!, question: String!, topK: Int): SiteAskResult!
+  jobs: [Job!]!
+  stats: Stats!
+  askSite(jobId: String, url: String!, question: String!, topK: Int): SiteAskResult!
+  getChatHistory(jobId: String!): [ChatMessage!]!
 }
 
 type Mutation {
+  createJob(input: CreateJobInput!): Job!
+  askQuestion(jobId: String!, question: String!): SiteAskResult!
   crawlAndTrainSite(url: String!, maxPages: Int, maxDepth: Int): SiteTrainResult!
 }

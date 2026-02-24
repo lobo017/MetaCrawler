@@ -86,6 +86,7 @@ export default function JobController({ onCreated }) {
           aria-describedby="type-hint"
         >
           <option value="auto">⚡ Auto • Let MetaCrawler choose</option>
+          <option value="site">🕸️ Full Site Knowledge Base (Crawl & Train)</option>
           <option value="static">🏗️ Go (Static HTML)</option>
           <option value="dynamic">🌐 Node.js (Dynamic / SPA)</option>
           <option value="ai">🤖 Python (AI / NLP)</option>
