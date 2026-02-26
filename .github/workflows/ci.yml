@@ -33,7 +33,7 @@ jobs:
           cd backend-python
           pip install -r requirements.txt
           pip install pytest
-          pytest tests/
+          python -m pytest tests/
 
   test-node:
     runs-on: ubuntu-latest
