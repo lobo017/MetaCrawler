@@ -9,7 +9,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 COPY package*.json ./
-RUN npm install
+RUN npm ci
 # Install Playwright Chromium browser binary
 RUN npx playwright install chromium
 COPY . .
