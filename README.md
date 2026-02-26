@@ -1,113 +1,144 @@
-# MetaCrawler
+# MetaCrawler: Distributed AI-Powered Web Scraping Platform
 
-MetaCrawler is a full-stack AI-powered web scraping platform that combines Python, Go, and Node.js microservices behind a unified API gateway and a Next.js dashboard.
+[![Build Status](https://img.shields.io/github/actions/workflow/status/lobo017/MetaCrawler/ci.yml?branch=main)](https://github.com/lobo017/MetaCrawler/actions)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+[![Go Version](https://img.shields.io/badge/Go-1.21+-00ADD8.svg)](https://golang.org/)
+[![Python Version](https://img.shields.io/badge/Python-3.9+-3776AB.svg)](https://python.org/)
+[![Node Version](https://img.shields.io/badge/Node.js-18+-339933.svg)](https://nodejs.org/)
 
-## Architecture
+MetaCrawler is a full-stack web scraping and analytical platform designed for high-performance data extraction and local intelligence. By utilizing a polyglot microservice architecture, the system selects the optimal language and environment for specific scraping requirements, ranging from high-concurrency static crawls to complex JavaScript-heavy automation.
 
-- **frontend** (`Next.js`): dashboard for creating jobs and tracking stats/results.
-- **api-gateway** (`Node.js`): single entry point exposing `/graphql`, `/jobs`, and `/stats`.
-- **backend-python** (`FastAPI` + `Celery hooks`): static scraping and NLP enrichment.
-- **backend-go** (`net/http`): fast static page scraping endpoint.
-- **backend-node** (`Express`): dynamic scraping path (Playwright when available + fallback fetch mode).
-- **redis**: broker/result backend for Celery tasks.
+## Architectural Overview
 
-## Implemented Endpoints
+The platform is composed of several specialized services coordinated through a central gateway:
 
-### Python service (`:8000`)
-- `GET /health`
-- `POST /scrape/quick`
-- `POST /analyze`
-- `POST /site/crawl-and-train`
-- `POST /site/ask`
+* **Frontend (Next.js)**: A dashboard interface for managing scraping jobs, monitoring system statistics, and interacting with processed data.
+* **API Gateway (Node.js)**: A unified entry point providing a GraphQL interface for all platform operations, including job creation and data retrieval.
+* **Backend-Python (FastAPI & Celery)**: The primary service for Natural Language Processing (NLP) enrichment, including sentiment analysis and named entity recognition. It also manages site-aware retrieval-augmented generation (RAG) models.
+* **Backend-Go**: A high-efficiency service optimized for rapid static page scraping and concurrent crawling operations.
+* **Backend-Node (Express & Playwright)**: Dedicated to dynamic scraping requirements, capable of rendering JavaScript-heavy content through browser automation.
+* **Infrastructure**: Persistent data is managed via MongoDB, while Redis serves as the message broker for asynchronous task distribution.
 
-### Go service (`:8080`)
-- `GET /health`
-- `POST /scrape`
-- `POST /crawl`
+## Core Capabilities
 
-### Node service (`:3000`)
-- `GET /health`
-- `POST /scrape`
+### Polyglot Scraping Engine
 
-### API Gateway (`:4000`)
-- `GET /health`
-- `POST /graphql`
-- `GET /jobs`
-- `GET /stats`
+MetaCrawler implements a multi-tiered approach to data extraction. The system utilizes Go for speed during large-scale crawls and falls back to Node.js/Playwright when interactive elements or client-side rendering are detected.
 
-Supported GraphQL operations:
-- `query { jobs { ... } stats { ... } }`
-- `mutation CreateJob($input: CreateJobInput!) { createJob(input: $input) { ... } }`
+### Site-Aware Intelligence
 
-## Run with Docker Compose
+The platform can build local retrieval models from specific web domains. This allows users to perform targeted queries against a crawled site corpus without transmitting data to external third-party LLM providers.
+
+### NLP Enrichment
+
+Extracted content is processed through an enrichment layer that identifies key entities and determines sentiment, transforming raw HTML into structured, actionable intelligence.
+
+## Technical Specifications
+
+### GraphQL Schema
+
+The API Gateway exposes several key operations:
+
+* **Queries**: Retrieve job history, system performance statistics, and site-specific answers.
+* **Mutations**: Initiate new scraping tasks, trigger site-aware training, and manage chat sessions.
+
+## Configuration
+
+Before running the application, you must configure your environment variables. The system relies on these variables to route internal traffic and connect to databases.
+
+1. Copy the example environment file:
+   ```bash
+   cp .env.example .env
+   ```
+2. Update the `.env` file with your specific configurations (the defaults will work for standard local Docker deployment).
+
+## Testing
+
+MetaCrawler relies on specialized test suites for each microservice. To run the tests locally:
+
+* **Python (NLP & Task Queue):**
+```bash
+cd backend-python
+pytest tests/
+```
+
+
+* **Go (Scraper Engine):**
+```bash
+cd backend-go
+go test ./... -v
+```
+
+
+* **Node & API Gateway:**
+```bash
+cd api-gateway
+npm test
+```
+
+
+## Usage & API Documentation
+
+The primary method of interacting with MetaCrawler programmatically is through the API Gateway's GraphQL endpoint (`http://localhost:4000/graphql`).
+
+### Example: Submitting a Scraping Job
+
+```graphql
+mutation {
+  createJob(input: {
+    url: "[https://example.com](https://example.com)",
+    type: "static"
+  }) {
+    id
+    url
+    status
+    createdAt
+  }
+}
+```
+
+### Example: Querying Job Status
+
+```graphql
+query {
+  jobs {
+    id
+    status
+    result
+  }
+}
+```
+
+## Contributing
+
+We welcome contributions to MetaCrawler. Please see our [CONTRIBUTING.md](https://github.com/lobo017/MetaCrawler/blob/main/CONTRIBUTING.md) for guidelines on branch naming, commit message formatting, and pull request requirements.
+
+
+
+### Deployment
+
+The platform is fully containerized using Docker, allowing the entire stack to be deployed with a single command:
 
 ```bash
 docker compose up --build
 ```
 
-Dashboard: `http://localhost:3001`
+### Local Development
 
-## Local Development
+Individual services can be run independently for development purposes:
 
-### Python
-```bash
-cd backend-python
-pip install -r requirements.txt
-uvicorn main:app --reload --port 8000
-```
+* **Python Service**: Accessible on port 8000.
+* **Go Service**: Accessible on port 8080.
+* **Node Service**: Accessible on port 3000.
+* **API Gateway**: Accessible on port 4000.
 
-### Go
-```bash
-cd backend-go
-go run ./cmd/server
-```
+## Development Roadmap
 
-### Node backend
-```bash
-cd backend-node
-npm install
-npm start
-```
+Current development is structured into six phases:
 
-### API gateway
-```bash
-cd api-gateway
-npm start
-```
-
-### Frontend
-```bash
-cd frontend
-npm install
-npm run dev
-```
-
-Set in frontend shell if needed:
-
-```bash
-export NEXT_PUBLIC_GRAPHQL_URL=http://localhost:4000/graphql
-```
-
-
-## Site-aware crawling and local QA
-
-The Python service can now build a local retrieval model from a single site and answer questions from that site corpus.
-
-1. Crawl and train a local model (respects `robots.txt`):
-
-```bash
-curl -X POST http://localhost:8000/site/crawl-and-train \
-  -H 'Content-Type: application/json' \
-  -d '{"url":"https://example.com","max_pages":25,"max_depth":2}'
-```
-
-2. Ask questions against the trained site model:
-
-```bash
-curl -X POST http://localhost:8000/site/ask \
-  -H 'Content-Type: application/json' \
-  -d '{"question":"What products are offered?","top_k":3}'
-```
-
-The first endpoint uses the Go crawler (`/crawl`) as the primary concurrent engine, falls back to the Python crawler if Go fails or yields no pages, and finally falls back to the Node scraper (`/scrape`) if needed. It stores crawl output under `backend-python/data/` and trains a local TF-IDF retriever (no paid APIs).
-
+1. Establishment of the Python data layer and database integrations.
+2. Implementation of the high-performance Go crawling engine.
+3. Integration of Node.js for browser automation and dynamic content.
+4. Unification of services via the GraphQL API Gateway.
+5. Development of the Next.js frontend dashboard.
+6. Final optimization, volume persistence, and production documentation.

@@ -25,14 +25,16 @@ def test_train_from_go_shaped_crawl_without_chunks(tmp_path):
         encoding="utf-8",
     )
 
-    kb = SiteKnowledgeBase()
+    # FIX: Pass the required site_url argument
+    url = "https://example.com"
+    kb = SiteKnowledgeBase(url)
     training = kb.train_from_crawl(crawl_file)
 
     assert training["trained_chunks"] > 0
 
-    main.site_kbs.clear()
-    main.site_kb = kb
-    main.site_kbs[main.site_key("https://example.com")] = kb
+    # FIX: Removed the outdated main.site_kbs dictionary assignments. 
+    # Because ChromaDB is persistent, main.ask_site will inherently 
+    # read from the collection that kb.train_from_crawl() just wrote to.
 
-    answer = main.ask_site(main.SiteQuestionPayload(url="https://example.com", question="What does MetaCrawler do?", top_k=3))
+    answer = main.ask_site(main.SiteQuestionPayload(url=url, question="What does MetaCrawler do?", top_k=3))
     assert answer["matches"] or answer["confidence"] > 0
