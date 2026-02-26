@@ -99,58 +99,53 @@ export default function ChatModal({ job, onClose }) {
     if (e.target === e.currentTarget) onClose();
   };
 
+  const handleClearHistory = async () => {
+    setMessages([{ role: 'bot', text: 'History cleared. What else would you like to know?' }]);
+    const query = `mutation ClearJobChat($jobId: String!) { clearJobChat(jobId: $jobId) }`;
+    await fetch(process.env.NEXT_PUBLIC_GRAPHQL_URL || 'http://localhost:4000/graphql', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query, variables: { jobId: job.id } }),
+    });
+  };
+
   const handleSend = async (e) => {
     e.preventDefault();
     if (!input.trim()) return;
 
     const userMsg = { role: 'user', text: input };
-    setMessages((prev) => [...prev, userMsg]);
+    // Notice we inject a blank bot message instantly that we will stream text into!
+    setMessages((prev) => [...prev, userMsg, { role: 'bot', text: '' }]);
     setInput('');
     setLoading(true);
 
     try {
-      let query;
-      let variables;
-
-      if (isSiteMode) {
-        query = `
-          query AskSite($jobId: String, $url: String!, $question: String!, $topK: Int) {
-            askSite(jobId: $jobId, url: $url, question: $question, topK: $topK) {
-              answer
-            }
-          }
-        `;
-        variables = { jobId: job.id, url: job.url, question: userMsg.text, topK: 3 };
-      } else {
-        query = `
-          mutation Ask($jobId: String!, $question: String!) {
-            askQuestion(jobId: $jobId, question: $question) {
-              answer
-            }
-          }
-        `;
-        variables = { jobId: job.id, question: userMsg.text };
-      }
-
-      const res = await fetch(process.env.NEXT_PUBLIC_GRAPHQL_URL || 'http://localhost:4000/graphql', {
+      const res = await fetch(process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api/chat/stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query, variables }),
+        body: JSON.stringify({ jobId: job.id, question: userMsg.text }),
       });
 
-      const body = await res.json();
-      if (body.errors?.length) {
-        setMessages((prev) => [...prev, { role: 'bot', text: body.errors[0].message || "Sorry, I couldn't process that." }]);
-        return;
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const chunk = decoder.decode(value);
+
+        // Magically type out the chunk on the screen
+        setMessages((prev) => {
+          const newMessages = [...prev];
+          newMessages[newMessages.length - 1].text += chunk;
+          return newMessages;
+        });
       }
-
-      const answer = isSiteMode
-        ? (body.data?.askSite?.answer || "Sorry, I couldn't find an answer in the site corpus.")
-        : (body.data?.askQuestion?.answer || "Sorry, I couldn't process that.");
-
-      setMessages((prev) => [...prev, { role: 'bot', text: answer }]);
     } catch (err) {
-      setMessages((prev) => [...prev, { role: 'bot', text: 'Error connecting to QA brain.' }]);
+      setMessages((prev) => {
+        const newMessages = [...prev];
+        newMessages[newMessages.length - 1].text = "Error connecting to AI streaming engine.";
+        return newMessages;
+      });
     } finally {
       setLoading(false);
       inputRef.current?.focus();
@@ -176,24 +171,19 @@ export default function ChatModal({ job, onClose }) {
         exit="exit"
       >
         {/* Header */}
-        <div className="p-4 border-b border-white/[0.06] flex justify-between items-center">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-blue-500/10 border border-blue-500/15 flex items-center justify-center">
-              <Bot className="w-4 h-4 text-blue-400" />
-            </div>
-            <div>
-              <h3 className="text-sm font-semibold text-white">Data Q&A</h3>
-              <p className="text-[11px] text-slate-500 truncate max-w-[280px]" title={job.url}>{job.url}</p>
-            </div>
+        <div className="p-4 border-b border-white/10 flex justify-between items-center bg-white/5">
+          <div>
+            <h3 className="font-bold text-white flex items-center gap-2">
+              <span aria-hidden="true"></span> Data Q&A Bot
+            </h3>
+            <p className="text-xs text-slate-400 truncate max-w-[300px]" title={job.url}>{job.url}</p>
           </div>
-          <button
-            onClick={onClose}
-            aria-label="Close dialog"
-            className="text-slate-500 hover:text-slate-300 w-8 h-8 flex items-center justify-center rounded-lg
-                       hover:bg-white/[0.05] transition-all duration-200"
-          >
-            <X className="w-4 h-4" />
-          </button>
+          <div className="flex gap-2">
+            <button onClick={handleClearHistory} className="text-xs bg-white/5 hover:bg-rose-500/20 text-slate-300 hover:text-rose-400 px-3 py-1.5 rounded-lg transition-colors border border-white/5">
+              Clear Chat
+            </button>
+            <button onClick={onClose} className="text-slate-400 hover:text-white w-8 h-8 flex items-center justify-center rounded-lg hover:bg-white/10">✕</button>
+          </div>
         </div>
 
         {/* Messages */}

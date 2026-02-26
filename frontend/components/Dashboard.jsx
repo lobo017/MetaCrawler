@@ -102,6 +102,19 @@ export default function Dashboard() {
   }, []);
 
   useEffect(() => {
+    // Check if any jobs are still working
+    const hasPendingJobs = jobs.some(j => j.status === 'queued' || j.status === 'running');
+    if (!hasPendingJobs) return;
+
+    // If yes, ping the database every 3 seconds to see if they finished
+    const interval = setInterval(() => {
+      loadData();
+    }, 3000);
+
+    return () => clearInterval(interval);
+  }, [jobs, loadData]);
+
+  useEffect(() => {
     loadData();
     const interval = setInterval(loadData, 3000);
     return () => clearInterval(interval);

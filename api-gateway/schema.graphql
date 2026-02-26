@@ -67,4 +67,6 @@ type Mutation {
   addJobsToChat(chatId: String!, jobIds: [String!]!): Chat!
   deleteChat(id: String!): Boolean!
   askChat(chatId: String!, question: String!): SiteAskResult!
+  clearJobChat(jobId: String!): Boolean!
+  clearWorkspaceChat(chatId: String!): Boolean!
 }

@@ -2,7 +2,10 @@
  * MetaCrawler - Browser Scraper Module
  */
 
-const { chromium } = require('playwright');
+
+const { chromium } = require('playwright-extra');
+const stealth = require('puppeteer-extra-plugin-stealth')();
+chromium.use(stealth);
 
 async function scrapeUrl(url, selector = null) {
   let browser = null;

@@ -99,6 +99,16 @@ async function handleGraphQL(body) {
       }))
     };
   }
+  if (query.includes('mutation') && query.includes('clearJobChat')) {
+    const { jobId } = body.variables || {};
+    await Job.findOneAndUpdate({ id: jobId }, { chatHistory: [] });
+    return { clearJobChat: true };
+  }
+  if (query.includes('mutation') && query.includes('clearWorkspaceChat')) {
+    const { chatId } = body.variables || {};
+    await Chat.findOneAndUpdate({ id: chatId }, { chatHistory: [] });
+    return { clearWorkspaceChat: true };
+  }
   
   throw new Error('Unsupported operation');
 }
@@ -152,9 +162,27 @@ async function createJob(input) {
   const serviceType = jobType.split(' ')[0];
   dispatchJob({ ...input, type: serviceType })
     .then(async (result) => {
+      // NEW: Unify Vector Database! Embed single-page scrapes into ChromaDB automatically
+      if (serviceType !== 'site') {
+        try {
+          let rawText = '';
+          const parsed = typeof result === 'string' ? JSON.parse(result) : result;
+          rawText = parsed.text || (Array.isArray(parsed.content) ? parsed.content.join(' ') : '');
+          if (!rawText && typeof result === 'string') rawText = result;
+
+          if (rawText && rawText.length > 10) {
+            await callService(`${SERVICE_URLS.ai}/embed`, { job_id: jobId, text: rawText });
+          }
+        } catch (e) {
+          console.error(`Failed to embed job ${jobId}`, e);
+        }
+      }
+      
       await Job.findOneAndUpdate({ id: jobId }, { status: 'done', result: JSON.stringify(result) });
     })
     .catch(async (error) => {
+      // ADDED BACK THE CATCH BLOCK to handle failed jobs gracefully
+      console.error(`Job ${jobId} failed:`, error);
       await Job.findOneAndUpdate({ id: jobId }, { status: 'failed', result: error.message });
     });
 
@@ -184,14 +212,22 @@ async function dispatchJob(input) {
   throw new Error(`Unsupported job type: ${type}`);
 }
 
-async function callService(endpoint, payload) {
-  const response = await fetch(endpoint, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
-  if (!response.ok) throw new Error(`Service call failed (${response.status}) at ${endpoint}`);
-  return response.json();
+async function callService(endpoint, payload, maxRetries = 3) {
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (!response.ok) throw new Error(`Service call failed (${response.status}) at ${endpoint}`);
+      return await response.json();
+    } catch (error) {
+      if (attempt === maxRetries) throw error; // Give up after 3 tries
+      console.warn(`[Retry ${attempt}/${maxRetries}] Failed to call ${endpoint}. Retrying in 2s...`);
+      await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2 seconds
+    }
+  }
 }
 
 async function askQuestion(jobId, question) {

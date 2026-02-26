@@ -19,6 +19,16 @@ export default function WorkspaceChatModal({ chat, allJobs, onClose, onRefresh }
 
     useEffect(() => scrollRef.current?.scrollIntoView({ behavior: 'smooth' }), [messages]);
 
+    const handleClearHistory = async () => {
+        setMessages([{ role: 'bot', text: `History cleared. I am connected to ${chat.jobIds.length} sources. Ask me anything!` }]);
+        const query = `mutation ClearWorkspaceChat($chatId: String!) { clearWorkspaceChat(chatId: $chatId) }`;
+        await fetch(process.env.NEXT_PUBLIC_GRAPHQL_URL || 'http://localhost:4000/graphql', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ query, variables: { chatId: chat.id } }),
+        });
+        onRefresh();
+    };
+
     const handleSend = async (e) => {
         e.preventDefault();
         if (!input.trim()) return;
@@ -87,6 +97,17 @@ export default function WorkspaceChatModal({ chat, allJobs, onClose, onRefresh }
                         </div>
                     </div>
                     <div className="flex gap-2">
+                        <button onClick={() => setIsAddingSources(!isAddingSources)} className="text-xs bg-white/[0.05] hover:bg-white/[0.1] text-slate-300 px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1.5 border border-white/[0.05]">
+                            <Plus className="w-3.5 h-3.5" /> Add Sources
+                        </button>
+                        <button onClick={onClose} className="text-slate-400 hover:text-white w-8 h-8 flex items-center justify-center rounded-lg hover:bg-white/[0.05]">
+                            <X className="w-4 h-4" />
+                        </button>
+                    </div>
+                    <div className="flex gap-2">
+                        <button onClick={handleClearHistory} className="text-xs bg-white/[0.05] hover:bg-rose-500/20 text-slate-300 hover:text-rose-400 px-3 py-1.5 rounded-lg transition-colors border border-white/[0.05]">
+                            Clear
+                        </button>
                         <button onClick={() => setIsAddingSources(!isAddingSources)} className="text-xs bg-white/[0.05] hover:bg-white/[0.1] text-slate-300 px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1.5 border border-white/[0.05]">
                             <Plus className="w-3.5 h-3.5" /> Add Sources
                         </button>
