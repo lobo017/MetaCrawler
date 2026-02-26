@@ -1,5 +1,11 @@
 # MetaCrawler: Distributed AI-Powered Web Scraping Platform
 
+[![Build Status](https://img.shields.io/github/actions/workflow/status/lobo017/MetaCrawler/ci.yml?branch=main)](https://github.com/lobo017/MetaCrawler/actions)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+[![Go Version](https://img.shields.io/badge/Go-1.21+-00ADD8.svg)](https://golang.org/)
+[![Python Version](https://img.shields.io/badge/Python-3.9+-3776AB.svg)](https://python.org/)
+[![Node Version](https://img.shields.io/badge/Node.js-18+-339933.svg)](https://nodejs.org/)
+
 MetaCrawler is a full-stack web scraping and analytical platform designed for high-performance data extraction and local intelligence. By utilizing a polyglot microservice architecture, the system selects the optimal language and environment for specific scraping requirements, ranging from high-concurrency static crawls to complex JavaScript-heavy automation.
 
 ## Architectural Overview
@@ -35,6 +41,79 @@ The API Gateway exposes several key operations:
 
 * **Queries**: Retrieve job history, system performance statistics, and site-specific answers.
 * **Mutations**: Initiate new scraping tasks, trigger site-aware training, and manage chat sessions.
+
+## Configuration
+
+Before running the application, you must configure your environment variables. The system relies on these variables to route internal traffic and connect to databases.
+
+1. Copy the example environment file:
+   ```bash
+   cp .env.example .env
+   ```
+2. Update the `.env` file with your specific configurations (the defaults will work for standard local Docker deployment).
+
+## Testing
+
+MetaCrawler relies on specialized test suites for each microservice. To run the tests locally:
+
+* **Python (NLP & Task Queue):**
+```bash
+cd backend-python
+pytest tests/
+```
+
+
+* **Go (Scraper Engine):**
+```bash
+cd backend-go
+go test ./... -v
+```
+
+
+* **Node & API Gateway:**
+```bash
+cd api-gateway
+npm test
+```
+
+
+## Usage & API Documentation
+
+The primary method of interacting with MetaCrawler programmatically is through the API Gateway's GraphQL endpoint (`http://localhost:4000/graphql`).
+
+### Example: Submitting a Scraping Job
+
+```graphql
+mutation {
+  createJob(input: {
+    url: "[https://example.com](https://example.com)",
+    type: "static"
+  }) {
+    id
+    url
+    status
+    createdAt
+  }
+}
+```
+
+### Example: Querying Job Status
+
+```graphql
+query {
+  jobs {
+    id
+    status
+    result
+  }
+}
+```
+
+## Contributing
+
+We welcome contributions to MetaCrawler. Please see our [CONTRIBUTING.md](https://www.google.com/search?q=CONTRIBUTING.md) for guidelines on branch naming, commit message formatting, and pull request requirements.
+
+
 
 ### Deployment
 
