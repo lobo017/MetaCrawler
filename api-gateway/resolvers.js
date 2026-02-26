@@ -18,8 +18,16 @@ const jobSchema = new mongoose.Schema({
   chatHistory: { type: Array, default: [] }, // Format: [{ role: 'user', text: '...' }]
   createdAt: { type: Date, default: Date.now },
 });
-
 const Job = mongoose.model('Job', jobSchema);
+
+const chatSchema = new mongoose.Schema({
+  id: { type: String, required: true, unique: true },
+  title: String,
+  jobIds: { type: Array, default: [] },
+  chatHistory: { type: Array, default: [] },
+  createdAt: { type: Date, default: Date.now },
+});
+const Chat = mongoose.model('Chat', chatSchema);
 
 const SERVICE_URLS = {
   static: process.env.GO_SERVICE_URL || 'http://go:8080',
@@ -41,6 +49,11 @@ async function handleGraphQL(body) {
     const { url, maxPages, maxDepth } = body.variables || {};
     return { crawlAndTrainSite: await crawlAndTrainSite(url, maxPages, maxDepth) };
   }
+  if (query.includes('mutation') && query.includes('deleteJob')) {
+    const { id } = body.variables || {};
+    await Job.deleteOne({ id });
+    return { deleteJob: true };
+  }
   if (query.includes('query') && query.includes('askSite')) {
     const { jobId, url, question, topK } = body.variables || {};
     return { askSite: await askSite(jobId, url, question, topK) };
@@ -50,12 +63,43 @@ async function handleGraphQL(body) {
     const job = await Job.findOne({ id: jobId }).lean();
     return { getChatHistory: job?.chatHistory || [] };
   }
-  if (query.includes('jobs') || query.includes('stats')) {
+  
+  // --- NEW WORKSPACE MUTATIONS ---
+  if (query.includes('mutation') && query.includes('createChat')) {
+    const { title, jobIds } = body.variables || {};
+    const chat = await Chat.create({ id: crypto.randomUUID(), title, jobIds });
+    return { createChat: { ...chat.toObject(), history: [], createdAt: chat.createdAt.toISOString() } };
+  }
+  if (query.includes('mutation') && query.includes('addJobsToChat')) {
+    const { chatId, jobIds } = body.variables || {};
+    const chat = await Chat.findOneAndUpdate({ id: chatId }, { $addToSet: { jobIds: { $each: jobIds } } }, { new: true }).lean();
+    return { addJobsToChat: { ...chat, history: chat.chatHistory || [], createdAt: chat.createdAt.toISOString() } };
+  }
+  if (query.includes('mutation') && query.includes('deleteChat')) {
+    const { id } = body.variables || {};
+    await Chat.deleteOne({ id });
+    return { deleteChat: true };
+  }
+  if (query.includes('mutation') && query.includes('askChat')) {
+    const { chatId, question } = body.variables || {};
+    return { askChat: await askChat(chatId, question) };
+  }
+
+  // --- FIXED DASHBOARD QUERY ROUTER ---
+  // If the frontend is asking for jobs, stats, or chats, fetch and return them ALL.
+  if (query.includes('jobs') || query.includes('stats') || query.includes('chats')) {
+    const chats = await Chat.find().sort({ createdAt: -1 }).lean();
     return {
       jobs: await getJobs(),
       stats: await getStats(),
+      chats: chats.map(c => ({ 
+        ...c, 
+        history: c.chatHistory || [], 
+        createdAt: c.createdAt.toISOString() 
+      }))
     };
   }
+  
   throw new Error('Unsupported operation');
 }
 
@@ -94,6 +138,8 @@ async function createJob(input) {
   }
 
   const jobId = crypto.randomUUID();
+  
+  // 1. Immediately create the queued job in MongoDB
   await Job.create({
     id: jobId,
     url: input.url,
@@ -102,14 +148,17 @@ async function createJob(input) {
     result: null,
   });
 
-  try {
-    const serviceType = jobType.split(' ')[0];
-    const result = await dispatchJob({ ...input, type: serviceType });
-    await Job.findOneAndUpdate({ id: jobId }, { status: 'done', result: JSON.stringify(result) });
-  } catch (error) {
-    await Job.findOneAndUpdate({ id: jobId }, { status: 'failed', result: error.message });
-  }
+  // 2. FIRE AND FORGET: Start the scrape in the background without awaiting it!
+  const serviceType = jobType.split(' ')[0];
+  dispatchJob({ ...input, type: serviceType })
+    .then(async (result) => {
+      await Job.findOneAndUpdate({ id: jobId }, { status: 'done', result: JSON.stringify(result) });
+    })
+    .catch(async (error) => {
+      await Job.findOneAndUpdate({ id: jobId }, { status: 'failed', result: error.message });
+    });
 
+  // 3. Return the queued job instantly to the UI
   const finalJob = await Job.findOne({ id: jobId }).lean();
   return { ...finalJob, createdAt: finalJob.createdAt.toISOString() };
 }
@@ -235,6 +284,51 @@ async function crawlAndTrainSite(url, maxPages = 25, maxDepth = 2) {
     confidence: null,
     warnings: [],
   };
+}
+
+async function askChat(chatId, question) {
+  if (!chatId || !question) throw new Error('chatId and question are required');
+  const chat = await Chat.findOne({ id: chatId }).lean();
+  if (!chat) throw new Error('Chat not found');
+
+  // Fetch all associated jobs
+  const jobs = await Job.find({ id: { $in: chat.jobIds } }).lean();
+  
+  const texts = [];
+  const urls = [];
+
+  for (const job of jobs) {
+    if (job.type.startsWith('site')) {
+      urls.push(job.url); // Send to ChromaDB
+    } else {
+      // Extract raw text for single-page scrapes
+      try {
+        const parsed = JSON.parse(job.result);
+        const t = parsed.text || (Array.isArray(parsed.content) ? parsed.content.join(' ') : '');
+        if (t) texts.push(t);
+      } catch {
+        if (job.result) texts.push(job.result);
+      }
+    }
+  }
+
+  const history = (chat.chatHistory || []).map(msg => ({
+    role: String(msg.role || ''),
+    text: String(msg.text || '')
+  }));
+
+  // Call the new Hybrid Python endpoint
+  const qaResult = await callService(`${SERVICE_URLS.ai}/chat/ask`, { 
+    question, texts, urls, history 
+  });
+
+  if (qaResult?.answer) {
+    await Chat.findOneAndUpdate(
+      { id: chatId },
+      { $push: { chatHistory: { $each: [{ role: 'user', text: question }, { role: 'bot', text: qaResult.answer }] } } }
+    );
+  }
+  return qaResult;
 }
 
 module.exports = { handleGraphQL, getJobs, getStats };

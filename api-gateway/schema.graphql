@@ -1,3 +1,11 @@
+type Chat {
+  id: String!
+  title: String!
+  jobIds: [String!]!
+  history: [ChatMessage!]!
+  createdAt: String!
+}
+
 type Job {
   id: String!
   url: String!
@@ -46,10 +54,17 @@ type Query {
   stats: Stats!
   askSite(jobId: String, url: String!, question: String!, topK: Int): SiteAskResult!
   getChatHistory(jobId: String!): [ChatMessage!]!
+  chats: [Chat!]!
+  getChat(id: String!): Chat
 }
 
 type Mutation {
   createJob(input: CreateJobInput!): Job!
   askQuestion(jobId: String!, question: String!): SiteAskResult!
   crawlAndTrainSite(url: String!, maxPages: Int, maxDepth: Int): SiteTrainResult!
+  deleteJob(id: String!): Boolean!
+  createChat(title: String!, jobIds: [String!]!): Chat!
+  addJobsToChat(chatId: String!, jobIds: [String!]!): Chat!
+  deleteChat(id: String!): Boolean!
+  askChat(chatId: String!, question: String!): SiteAskResult!
 }

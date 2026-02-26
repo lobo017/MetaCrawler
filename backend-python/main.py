@@ -44,6 +44,13 @@ class SiteQuestionPayload(BaseModel):
     top_k: int = Field(default=3, ge=1, le=10)
     history: list[dict[str, str]] = []
 
+class MultiChatPayload(BaseModel):
+    question: str = Field(..., min_length=1)
+    history: list[dict[str, str]] = []
+    texts: list[str] = []
+    urls: list[str] = []
+    top_k: int = Field(default=3, ge=1, le=10)
+
 
 @app.get("/")
 def health_check() -> dict[str, str]:
@@ -123,3 +130,15 @@ def ask_site(payload: SiteQuestionPayload) -> dict[str, Any]:
         return kb.query(payload.question, top_k=payload.top_k, history=payload.history)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to answer: {exc}") from exc
+
+from app.nlp.processor import answer_multi_source
+
+@app.post("/chat/ask")
+def chat_ask_endpoint(payload: MultiChatPayload) -> dict[str, Any]:
+    return answer_multi_source(
+        question=payload.question, 
+        texts=payload.texts, 
+        urls=payload.urls, 
+        history=payload.history,
+        top_k=payload.top_k
+    )

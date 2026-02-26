@@ -14,10 +14,14 @@ import {
   WifiOff,
   Clock,
   Layers,
+  Trash2
 } from 'lucide-react';
 import AnalyticsChart from './AnalyticsChart';
 import JobController from './JobController';
 import ChatModal from './ChatModal';
+import { FolderPlus, Database } from 'lucide-react';
+import CreateWorkspaceModal from './CreateWorkspaceModal';
+import WorkspaceChatModal from './WorkspaceChatModal';
 
 const defaultStats = { totalJobs: 0, queuedJobs: 0, doneJobs: 0, failedJobs: 0 };
 
@@ -45,6 +49,9 @@ export default function Dashboard() {
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [lastSyncTime, setLastSyncTime] = useState('--:--');
+  const [chats, setChats] = useState([]);
+  const [isCreatingWorkspace, setIsCreatingWorkspace] = useState(false);
+  const [selectedChat, setSelectedChat] = useState(null);
 
   /* ── Health Check Poller ── */
   useEffect(() => {
@@ -63,11 +70,13 @@ export default function Dashboard() {
   }, []);
 
   /* ── Data Fetching ── */
+  // Replace your existing loadData function with this:
   const loadData = useCallback(async () => {
     const query = `
       query { 
         jobs { id url type status createdAt result } 
         stats { totalJobs queuedJobs doneJobs failedJobs } 
+        chats { id title jobIds createdAt history { role text } }
       }
     `;
 
@@ -81,8 +90,9 @@ export default function Dashboard() {
 
       const body = await response.json();
       if (!body?.data) return;
-      setJobs(body.data.jobs);
-      setStats(body.data.stats);
+      setJobs(body.data.jobs || []);
+      setStats(body.data.stats || defaultStats);
+      setChats(body.data.chats || []); // <--- Set the chats
     } catch (e) {
       console.error("Failed to fetch jobs", e);
     } finally {
@@ -101,6 +111,37 @@ export default function Dashboard() {
     setIsRefreshing(true);
     await loadData();
     setTimeout(() => setIsRefreshing(false), 600);
+  };
+
+  const handleDeleteJob = async (jobId) => {
+    // Optimistically update the UI to remove it instantly
+    setJobs(prevJobs => prevJobs.filter(job => job.id !== jobId));
+
+    // Send the delete request to the backend
+    const query = `
+      mutation DeleteJob($id: String!) {
+        deleteJob(id: $id)
+      }
+    `;
+    try {
+      await fetch(process.env.NEXT_PUBLIC_GRAPHQL_URL || 'http://localhost:4000/graphql', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query, variables: { id: jobId } }),
+      });
+      loadData(); // Refresh stats after deletion
+    } catch (e) {
+      console.error("Failed to delete job", e);
+    }
+  };
+
+  const handleDeleteChat = async (chatId) => {
+    setChats(prev => prev.filter(c => c.id !== chatId));
+    const query = `mutation DeleteChat($id: String!) { deleteChat(id: $id) }`;
+    await fetch(process.env.NEXT_PUBLIC_GRAPHQL_URL || 'http://localhost:4000/graphql', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query, variables: { id: chatId } }),
+    });
   };
 
   return (
@@ -222,6 +263,48 @@ export default function Dashboard() {
         </motion.div>
 
         {/* ── Recent Jobs Table ── */}
+        {/* ── Workspaces / Multi-Source Chats ── */}
+        <motion.section className="glass-panel p-6" variants={fadeUp}>
+          <div className="flex justify-between items-center mb-6">
+            <h2 className="text-base font-semibold text-white flex items-center gap-2.5">
+              <div className="w-6 h-6 rounded-md bg-cyan-500/10 border border-cyan-500/15 flex items-center justify-center">
+                <Database className="w-3.5 h-3.5 text-cyan-400" />
+              </div>
+              Active Workspaces
+            </h2>
+            <button
+              onClick={() => setIsCreatingWorkspace(true)}
+              className="text-xs bg-cyan-600 hover:bg-cyan-500 text-white px-4 py-2 rounded-lg transition-colors flex items-center gap-2 font-medium shadow-lg shadow-cyan-500/10"
+            >
+              <FolderPlus className="w-3.5 h-3.5" /> New Workspace
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {chats.length === 0 ? (
+              <p className="text-sm text-slate-500 italic col-span-full">No workspaces created yet. Group multiple scrapes together to chat with them all at once!</p>
+            ) : (
+              chats.map(chat => (
+                <div key={chat.id} className="p-4 rounded-xl border border-white/[0.06] bg-white/[0.02] hover:bg-white/[0.04] transition-colors group relative">
+                  <div className="flex justify-between items-start mb-2">
+                    <h3 className="font-semibold text-sm text-slate-100">{chat.title}</h3>
+                    <button onClick={() => handleDeleteChat(chat.id)} className="text-slate-500 hover:text-rose-400 transition-colors opacity-0 group-hover:opacity-100">
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                  <p className="text-xs text-slate-400 mb-4">{chat.jobIds.length} connected sources</p>
+
+                  <button
+                    onClick={() => setSelectedChat(chat)}
+                    className="w-full py-2 bg-white/[0.05] hover:bg-cyan-500/20 hover:text-cyan-400 border border-white/[0.05] hover:border-cyan-500/30 rounded-lg text-xs font-medium transition-all flex justify-center items-center gap-2 text-slate-300"
+                  >
+                    <MessageSquare className="w-3.5 h-3.5" /> Open Workspace
+                  </button>
+                </div>
+              ))
+            )}
+          </div>
+        </motion.section>
         <motion.section
           className="glass-panel p-6"
           aria-label="Recent jobs"
@@ -257,7 +340,7 @@ export default function Dashboard() {
               <span className="sr-only">Loading job data...</span>
             </div>
           ) : (
-            <div className="overflow-x-auto" role="region" aria-label="Jobs table" tabIndex={0}>
+            <div className="overflow-hidden" role="region" aria-label="Jobs table" tabIndex={0}>
               <table className="min-w-full text-sm" role="table">
                 <thead>
                   <tr className="border-b border-white/[0.04]">
@@ -269,7 +352,7 @@ export default function Dashboard() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-white/[0.03]">
-                  <AnimatePresence mode="popLayout">
+                  <AnimatePresence>
                     {jobs.map((job) => (
                       <motion.tr
                         key={job.id}
@@ -277,8 +360,21 @@ export default function Dashboard() {
                         variants={fadeIn}
                         initial="hidden"
                         animate="visible"
-                        exit={{ opacity: 0, x: -10, transition: { duration: 0.2 } }}
+                        exit={{
+                          opacity: 0,
+                          height: 0,
+                          paddingTop: 0,
+                          paddingBottom: 0,
+                          transition: {
+                            opacity: { duration: 0.2, ease: 'easeOut' },
+                            height: { duration: 0.3, ease: [0.16, 1, 0.3, 1], delay: 0.1 },
+                            paddingTop: { duration: 0.3, ease: 'easeOut', delay: 0.1 },
+                            paddingBottom: { duration: 0.3, ease: 'easeOut', delay: 0.1 },
+                          },
+                        }}
+                        style={{ overflow: 'hidden' }}
                         layout
+                        transition={{ layout: { duration: 0.25, ease: [0.16, 1, 0.3, 1] } }}
                       >
                         <td className="py-3.5 px-4 max-w-xs truncate font-mono text-sm text-slate-300" title={job.url}>
                           {job.url}
@@ -302,7 +398,7 @@ export default function Dashboard() {
                           </time>
                         </td>
 
-                        <td className="py-3.5 px-4">
+                        <td className="py-3.5 px-4 flex items-center gap-2">
                           {job.status === 'done' && (
                             <motion.button
                               onClick={() => setSelectedJob(job)}
@@ -316,6 +412,15 @@ export default function Dashboard() {
                               Chat
                             </motion.button>
                           )}
+                          <motion.button
+                            onClick={() => handleDeleteJob(job.id)}
+                            aria-label={`Delete job ${job.url}`}
+                            className="text-xs bg-rose-500/8 text-rose-400 border border-rose-500/15 w-7 h-7 rounded-full flex items-center justify-center hover:bg-rose-500/15 transition-all duration-300"
+                            whileHover={{ scale: 1.05 }}
+                            whileTap={{ scale: 0.95 }}
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </motion.button>
                         </td>
                       </motion.tr>
                     ))}
@@ -349,6 +454,18 @@ export default function Dashboard() {
               job={selectedJob}
               onClose={() => setSelectedJob(null)}
             />
+          )}
+        </AnimatePresence>
+        <AnimatePresence>
+          {/* Legacy Single-Job Modal */}
+          {selectedJob && <ChatModal job={selectedJob} onClose={() => setSelectedJob(null)} />}
+
+          {/* New Modals */}
+          {isCreatingWorkspace && (
+            <CreateWorkspaceModal jobs={jobs} onClose={() => setIsCreatingWorkspace(false)} onCreated={loadData} />
+          )}
+          {selectedChat && (
+            <WorkspaceChatModal chat={selectedChat} allJobs={jobs} onClose={() => setSelectedChat(null)} onRefresh={loadData} />
           )}
         </AnimatePresence>
       </main>

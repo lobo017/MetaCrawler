@@ -74,10 +74,16 @@ export default function ChatModal({ job, onClose }) {
 
   useEffect(() => {
     scrollRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+    // Re-focus input after every message so the user can keep typing
+    if (!loading) {
+      inputRef.current?.focus();
+    }
+  }, [messages, loading]);
 
   useEffect(() => {
-    inputRef.current?.focus();
+    // Delay initial focus so it fires after the modal open animation completes
+    const timer = setTimeout(() => inputRef.current?.focus(), 400);
+    return () => clearTimeout(timer);
   }, []);
 
   const handleKeyDown = useCallback((e) => {
@@ -203,8 +209,8 @@ export default function ChatModal({ job, onClose }) {
               >
                 <div
                   className={`max-w-[80%] px-3.5 py-2.5 text-[13px] leading-relaxed ${msg.role === 'user'
-                      ? 'bg-blue-600 text-white rounded-2xl rounded-br-md'
-                      : 'bg-white/[0.04] text-slate-300 border border-white/[0.06] rounded-2xl rounded-bl-md'
+                    ? 'bg-blue-600 text-white rounded-2xl rounded-br-md'
+                    : 'bg-white/[0.04] text-slate-300 border border-white/[0.06] rounded-2xl rounded-bl-md'
                     }`}
                 >
                   {msg.text}

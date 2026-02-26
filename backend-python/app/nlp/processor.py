@@ -302,3 +302,72 @@ def _extract_keywords(text: str, limit: int = 8) -> list[str]:
     filtered = [token for token in tokens if token not in stopwords]
     ranked = Counter(filtered).most_common(limit)
     return [token for token, _ in ranked]
+
+def answer_multi_source(question: str, texts: list[str], urls: list[str], history: list[dict[str, str]], top_k: int) -> dict[str, Any]:
+    context_snippets = []
+
+    # 1. Fetch from site collections (ChromaDB)
+    from app.nlp.site_qa import SiteKnowledgeBase
+    for url in urls:
+        try:
+            kb = SiteKnowledgeBase(url)
+            if kb.collection.count() > 0:
+                res = kb.collection.query(query_texts=[question], n_results=top_k)
+                if res["documents"] and res["documents"][0]:
+                    context_snippets.extend(res["documents"][0])
+        except Exception:
+            pass
+
+    # 2. Extract best chunks from raw single-page texts (TF-IDF)
+    if texts:
+        combined_text = "\n".join(texts)
+        raw_sentences = re.split(r'(?<!\w\.\w.)(?<![A-Z][a-z]\.)(?<=\.|\?|\!)\s', combined_text)
+        sentences = [s.strip() for s in raw_sentences if len(s.strip()) > 15]
+
+        if sentences:
+            WINDOW = 3
+            chunks = []
+            for i in range(len(sentences)):
+                end = min(i + WINDOW, len(sentences))
+                chunks.append(" ".join(sentences[i:end]))
+
+            try:
+                vectorizer = TfidfVectorizer(stop_words="english", ngram_range=(1, 2), max_features=10000)
+                tfidf_matrix = vectorizer.fit_transform([question] + chunks)
+                cosine_sims = cosine_similarity(tfidf_matrix[0:1], tfidf_matrix[1:]).flatten()
+                
+                # Get top K chunks from the text
+                top_indices = np.argsort(cosine_sims)[-top_k:][::-1]
+                for idx in top_indices:
+                    if cosine_sims[idx] > 0.05:
+                        context_snippets.append(chunks[idx])
+            except ValueError:
+                pass
+
+    if not context_snippets:
+        return {"answer": "I don't have enough relevant context from the selected sources to answer.", "confidence": 0.0}
+
+    # 3. Limit context to avoid overflowing the small model
+    final_context = "\n\n---\n\n".join(context_snippets[:3])
+
+    # 4. GENERATE
+    generator = _get_llm()
+    messages = [
+        {"role": "system", "content": "You are an expert data analyst. Answer the user's question directly using ONLY the provided context. If the context lacks the answer, state: 'I cannot answer this based on the scraped data.' Do not hallucinate."}
+    ]
+
+    for msg in history[-4:]:
+        role = "assistant" if msg.get("role") == "bot" else "user"
+        messages.append({"role": role, "content": msg.get("text", "")})
+
+    messages.append({"role": "user", "content": f"Context:\n{final_context}\n\nQuestion:\n{question}"})
+
+    prompt = generator.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+    outputs = generator(prompt, max_new_tokens=150, do_sample=False)
+    generated_answer = outputs[0]["generated_text"][len(prompt):].strip()
+
+    return {
+        "answer": generated_answer,
+        "confidence": 1.0,
+        "method": "multi_source_rag"
+    }
