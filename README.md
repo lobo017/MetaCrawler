@@ -111,7 +111,7 @@ query {
 
 ## Contributing
 
-We welcome contributions to MetaCrawler. Please see our [CONTRIBUTING.md](https://www.google.com/search?q=CONTRIBUTING.md) for guidelines on branch naming, commit message formatting, and pull request requirements.
+We welcome contributions to MetaCrawler. Please see our [CONTRIBUTING.md](https://github.com/lobo017/MetaCrawler/blob/main/CONTRIBUTING.md) for guidelines on branch naming, commit message formatting, and pull request requirements.
 
 
 
