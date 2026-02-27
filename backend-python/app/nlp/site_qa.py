@@ -37,6 +37,12 @@ def _get_llm():
         )
     return _llm_pipe
 
+def _get_embeddings():
+    """Returns a LangChain-compatible HuggingFace embedding model."""
+    from langchain_community.embeddings import HuggingFaceEmbeddings
+    # This is the exact same model ChromaDB uses by default
+    return HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+
 def _get_collection_name(url: str) -> str:
     clean = re.sub(r'[^a-zA-Z0-9_-]', '_', url)
     return clean.strip('_')[:63]

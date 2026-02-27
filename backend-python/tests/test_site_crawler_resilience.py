@@ -15,14 +15,18 @@ def test_crawl_site_go_handles_null_list_fields(monkeypatch):
         def json(self):
             return {"pages": None, "failedUrls": None, "blockedUrls": None}
 
-    monkeypatch.setattr(site_crawler.get_http_session, "post", lambda *args, **kwargs: FakeResponse())
+    class FakeSession:
+        def post(self, *args, **kwargs):
+            return FakeResponse()
+
+    # Mock the function to return our FakeSession instead of trying to attach .post to the function directly
+    monkeypatch.setattr(site_crawler, "get_http_session", lambda: FakeSession())
 
     result = site_crawler.crawl_site_go("https://example.com", max_pages=5, max_depth=1)
 
     assert result.pages == []
     assert result.blocked_urls == []
     assert isinstance(result.failed_urls, list)
-
 
 def test_crawl_and_train_falls_back_when_go_throws(monkeypatch):
     def fake_go(*args, **kwargs):

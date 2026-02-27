@@ -14,7 +14,7 @@ from app.nlp.site_qa import SiteKnowledgeBase
 from app.scrapers.basic_scraper import scrape_url
 from app.scrapers.site_crawler import crawl_site, save_crawl
 from celery_worker import celery_app, process_nlp_task, process_quick_scrape_task
-from app.nlp.unified_rag import embed_text, get_stream_response
+from app.unified_rag import embed_text, get_stream_response
 
 
 app = FastAPI(title="MetaCrawler Python Service", version="1.0.0")
@@ -161,4 +161,9 @@ def embed_endpoint(payload: EmbedPayload):
 
 @app.post("/stream/chat")
 def stream_chat_endpoint(payload: StreamPayload):
-    return get_stream_response(payload.question, payload.urls, payload.job_ids, pay
+    return get_stream_response(
+        payload.question, 
+        payload.urls, 
+        payload.job_ids, 
+        payload.history
+    )

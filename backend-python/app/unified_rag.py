@@ -3,7 +3,7 @@ from langchain_community.vectorstores import Chroma
 from transformers import TextIteratorStreamer
 from threading import Thread
 from fastapi.responses import StreamingResponse
-from app.nlp.site_qa import _get_embeddings, _get_llm
+from app.nlp.site_qa import _get_embeddings, _get_llm, CHROMA_DIR
 import logging
 
 def embed_text(job_id: str, text: str):
@@ -14,7 +14,7 @@ def embed_text(job_id: str, text: str):
     if not chunks:
         return {"status": "ignored", "reason": "no text"}
         
-    db = Chroma(persist_directory="./data/chroma", embedding_function=_get_embeddings(), collection_name=f"job_{job_id}")
+    db = Chroma(persist_directory=str(CHROMA_DIR), embedding_function=_get_embeddings(), collection_name=f"job_{job_id}")
     db.add_texts(texts=chunks)
     return {"status": "success", "chunks": len(chunks)}
 
@@ -26,7 +26,7 @@ def stream_answer(question: str, urls: list[str], job_ids: list[str], history: l
     # 1. Query full site crawls (Collections named after URLs)
     for url in urls:
         try:
-            db = Chroma(persist_directory="./data/chroma", embedding_function=embedder, collection_name=url)
+            db = Chroma(persist_directory=str(CHROMA_DIR), embedding_function=embedder, collection_name=url)
             if db._collection.count() > 0:
                 docs = db.similarity_search(question, k=2)
                 context_snippets.extend([d.page_content for d in docs])
@@ -36,7 +36,7 @@ def stream_answer(question: str, urls: list[str], job_ids: list[str], history: l
     # 2. Query single page scrapes (Collections named after Job IDs)
     for jid in job_ids:
         try:
-            db = Chroma(persist_directory="./data/chroma", embedding_function=embedder, collection_name=f"job_{jid}")
+            db = Chroma(persist_directory=str(CHROMA_DIR), embedding_function=embedder, collection_name=f"job_{jid}")
             if db._collection.count() > 0:
                 docs = db.similarity_search(question, k=2)
                 context_snippets.extend([d.page_content for d in docs])
