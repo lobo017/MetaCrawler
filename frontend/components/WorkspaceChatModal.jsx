@@ -169,7 +169,7 @@ function AddSourcesView({ chat, allJobs, onSave, onCancel, loading }) {
         <div className="flex-1 flex flex-col p-6">
             <h4 className="text-sm font-semibold mb-4 text-white">Select new sources to attach</h4>
             <div className="flex-1 overflow-y-auto space-y-2 custom-scrollbar pr-2 mb-4">
-                {availableJobs.length === 0 ? <p className="text-slate-500 text-sm">No new completed jobs available.</p> : availableJobs.map(job => (
+                {availableJobs.length === 0 ? <p className="text-slate-500 text-sm">No new successful jobs available.</p> : availableJobs.map(job => (
                     <label key={job.id} className={`flex items-center gap-3 p-3 rounded-xl border cursor-pointer ${selected.includes(job.id) ? 'bg-cyan-500/10 border-cyan-500/30' : 'bg-white/[0.02] border-white/[0.06]'}`}>
                         <input type="checkbox" className="accent-cyan-500 w-4 h-4 rounded" checked={selected.includes(job.id)} onChange={() => toggle(job.id)} />
                         <span className="text-sm truncate flex-1 text-slate-200">{job.url}</span>

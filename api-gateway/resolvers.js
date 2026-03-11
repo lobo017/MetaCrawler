@@ -2,23 +2,66 @@
 const crypto = require('crypto');
 const mongoose = require('mongoose');
 
+const logger = {
+  log: (level, msg, meta = {}) => {
+    console.log(JSON.stringify({
+      timestamp: new Date().toISOString(),
+      level,
+      service: 'api-gateway',
+      message: msg,
+      ...meta
+    }));
+  },
+  info: (msg, meta) => logger.log('info', msg, meta),
+  warn: (msg, meta) => logger.log('warn', msg, meta),
+  error: (msg, meta) => logger.log('error', msg, { ...meta, error: meta?.error?.message || meta?.error })
+};
+
 // Connect to MongoDB
 const MONGO_URI = process.env.MONGO_URI || 'mongodb://mongo:27017/metacrawler';
 mongoose.connect(MONGO_URI)
-  .then(() => console.log('✅ Connected to MongoDB'))
+  .then(async () => {
+    console.log('✅ Connected to MongoDB');
+    await healStuckJobs();
+  })
   .catch(err => console.error('❌ MongoDB connection error:', err));
+
+/**
+ * On startup, mark any job that has been stuck in 'queued' for more than
+ * 5 minutes as 'failed'. This self-heals jobs that were orphaned by a
+ * previous container restart mid-execution.
+ */
+async function healStuckJobs() {
+  const STUCK_THRESHOLD_MS = 5 * 60 * 1000; // 5 minutes
+  const cutoff = new Date(Date.now() - STUCK_THRESHOLD_MS);
+  const result = await Job.updateMany(
+    { status: 'queued', createdAt: { $lt: cutoff } },
+    { $set: { status: 'failed', result: 'Gateway restarted — job was lost during execution.' } }
+  );
+  if (result.modifiedCount > 0) {
+    console.warn(`⚠️  Healed ${result.modifiedCount} stuck job(s) on startup.`);
+  }
+}
 
 // Define the Job Database Schema
 const jobSchema = new mongoose.Schema({
   id: { type: String, required: true, unique: true },
   url: String,
   type: String,
-  status: String,
+  status: { type: String, enum: ['queued', 'running', 'done', 'failed'] },
   result: String,
   chatHistory: { type: Array, default: [] }, // Format: [{ role: 'user', text: '...' }]
   createdAt: { type: Date, default: Date.now },
 });
 const Job = mongoose.model('Job', jobSchema);
+
+// Define the Cache Database Schema
+const cacheSchema = new mongoose.Schema({
+  key: { type: String, required: true, unique: true },
+  result: { type: String, required: true },
+  createdAt: { type: Date, expires: 86400, default: Date.now }, // TTL index: 24 hours
+});
+const Cache = mongoose.model('Cache', cacheSchema);
 
 const chatSchema = new mongoose.Schema({
   id: { type: String, required: true, unique: true },
@@ -38,10 +81,6 @@ const SERVICE_URLS = {
 async function handleGraphQL(body) {
   const query = body.query || '';
   
-  if (query.includes('mutation') && query.includes('askQuestion')) {
-    const { jobId, question } = body.variables || {};
-    return { askQuestion: await askQuestion(jobId, question) };
-  }
   if (query.includes('mutation') && query.includes('createJob')) {
     return { createJob: await createJob(body.variables?.input || {}) };
   }
@@ -63,8 +102,8 @@ async function handleGraphQL(body) {
     const job = await Job.findOne({ id: jobId }).lean();
     return { getChatHistory: job?.chatHistory || [] };
   }
-  
-  // --- NEW WORKSPACE MUTATIONS ---
+
+  // --- WORKSPACE MUTATIONS ---
   if (query.includes('mutation') && query.includes('createChat')) {
     const { title, jobIds } = body.variables || {};
     const chat = await Chat.create({ id: crypto.randomUUID(), title, jobIds });
@@ -79,10 +118,6 @@ async function handleGraphQL(body) {
     const { id } = body.variables || {};
     await Chat.deleteOne({ id });
     return { deleteChat: true };
-  }
-  if (query.includes('mutation') && query.includes('askChat')) {
-    const { chatId, question } = body.variables || {};
-    return { askChat: await askChat(chatId, question) };
   }
 
   // --- FIXED DASHBOARD QUERY ROUTER ---
@@ -111,6 +146,27 @@ async function handleGraphQL(body) {
   }
   
   throw new Error('Unsupported operation');
+}
+
+async function handleWebhook(body) {
+  const { jobId, status, result, error, metadata } = body;
+  if (!jobId || !status) throw new Error('jobId and status are required');
+
+  const job = await Job.findOne({ id: jobId }).lean();
+  if (!job) throw new Error('Job not found');
+
+  if (job.status === 'done' || job.status === 'failed') {
+    logger.warn(`Ignoring Webhook`, { jobId, currentStatus: job.status, newStatus: status, reason: 'already terminal' });
+    return { status: 'ignored', reason: 'already terminal' };
+  }
+
+  const updateData = { status };
+  if (result) updateData.result = typeof result === 'string' ? result : JSON.stringify(result);
+  if (error) updateData.result = error;
+
+  await Job.findOneAndUpdate({ id: jobId }, updateData);
+  logger.info(`Job Status Changed`, { jobId, status, event: 'webhook_received', metadata });
+  return { status: 'success' };
 }
 
 async function getJobs() {
@@ -148,6 +204,7 @@ async function createJob(input) {
   }
 
   const jobId = crypto.randomUUID();
+  logger.info(`Job Created`, { jobId, url: input.url, type: jobType, event: 'job_created' });
   
   // 1. Immediately create the queued job in MongoDB
   await Job.create({
@@ -160,9 +217,13 @@ async function createJob(input) {
 
   // 2. FIRE AND FORGET: Start the scrape in the background without awaiting it!
   const serviceType = jobType.split(' ')[0];
-  dispatchJob({ ...input, type: serviceType })
+  dispatchJob({ ...input, type: serviceType }, jobId)
     .then(async (result) => {
-      // NEW: Unify Vector Database! Embed single-page scrapes into ChromaDB automatically
+      if (result && result.async_task_queued) {
+         logger.info(`Job Dispatched to Queue`, { jobId, type: jobType, event: 'worker_dispatched', taskId: result.taskId });
+         return;
+      }
+
       if (serviceType !== 'site') {
         try {
           let rawText = '';
@@ -174,15 +235,15 @@ async function createJob(input) {
             await callService(`${SERVICE_URLS.ai}/embed`, { job_id: jobId, text: rawText });
           }
         } catch (e) {
-          console.error(`Failed to embed job ${jobId}`, e);
+          logger.warn(`Failed to embed job context`, { jobId, error: e.message });
         }
       }
       
       await Job.findOneAndUpdate({ id: jobId }, { status: 'done', result: JSON.stringify(result) });
+      logger.info(`Job Completed`, { jobId, event: 'status_changed', status: 'done' });
     })
     .catch(async (error) => {
-      // ADDED BACK THE CATCH BLOCK to handle failed jobs gracefully
-      console.error(`Job ${jobId} failed:`, error);
+      logger.error(`Job Failed`, { jobId, event: 'status_changed', status: 'failed', error });
       await Job.findOneAndUpdate({ id: jobId }, { status: 'failed', result: error.message });
     });
 
@@ -191,25 +252,64 @@ async function createJob(input) {
   return { ...finalJob, createdAt: finalJob.createdAt.toISOString() };
 }
 
-async function dispatchJob(input) {
-  const { url, type, selector, text } = input;
+async function dispatchJob(input, jobId) {
+  const { url, type, selector, text, forceRefresh } = input;
   if (!url || !type) throw new Error('input.url and input.type are required');
 
+  // Build a normalized Cache Key based strictly on operation intent
+  const params = [url, type];
+  if (selector) params.push(selector);
+  if (type === 'ai' && text) params.push(crypto.createHash('md5').update(text).digest('hex'));
+  const cacheKey = params.join('|');
+
+  if (!forceRefresh) {
+    try {
+      const cachedItem = await Cache.findOne({ key: cacheKey }).lean();
+      if (cachedItem && cachedItem.result) {
+        logger.info(`Cache Hit`, { jobId, event: 'cache_hit', url });
+        return JSON.parse(cachedItem.result); // Immediate hit. Bypass workers entirely.
+      }
+    } catch (err) {
+      logger.warn('Cache fetch failed, proceeding to worker', { jobId, error: err.message });
+    }
+    logger.info(`Cache Miss - Dispatching to worker`, { jobId, event: 'cache_miss', type, url });
+  } else {
+    logger.info(`Force Refresh requested - Bypassing cache`, { jobId, event: 'force_refresh_requested', url, type });
+  }
+
+  let result;
   if (type === 'static') {
     try {
-      return await callService(`${SERVICE_URLS.static}/scrape`, { url });
+      result = await callService(`${SERVICE_URLS.static}/scrape`, { url });
     } catch (_error) {
-      return callService(`${SERVICE_URLS.ai}/scrape/quick`, { url });
+      result = await callService(`${SERVICE_URLS.ai}/scrape/quick`, { url });
     }
+  } else if (type === 'dynamic') {
+    result = await callService(`${SERVICE_URLS.dynamic}/scrape`, { url, selector });
+  } else if (type === 'ai') {
+    if (text) result = await callService(`${SERVICE_URLS.ai}/analyze`, { text, tasks: ['sentiment', 'entities', 'keywords'] });
+    else result = await callService(`${SERVICE_URLS.ai}/scrape/quick`, { url });
+  } else if (type === 'site') {
+    result = await crawlAndTrainSite(url, jobId, 25, 2);
+  } else {
+    throw new Error(`Unsupported job type: ${type}`);
   }
-  if (type === 'dynamic') return callService(`${SERVICE_URLS.dynamic}/scrape`, { url, selector });
-  if (type === 'ai') {
-    if (text) return callService(`${SERVICE_URLS.ai}/analyze`, { text, tasks: ['sentiment', 'entities', 'keywords'] });
-    return callService(`${SERVICE_URLS.ai}/scrape/quick`, { url });
-  }
-  if (type === 'site') return await crawlAndTrainSite(url, 25, 2);
 
-  throw new Error(`Unsupported job type: ${type}`);
+  // Save successful response back to the Cache
+  // Do not cache asynchronous hand-offs (they cache via webhook on completion)
+  try {
+    if (result && !result.async_task_queued) {
+       await Cache.findOneAndUpdate(
+         { key: cacheKey },
+         { key: cacheKey, result: JSON.stringify(result) },
+         { upsert: true, new: true, setDefaultsOnInsert: true }
+       );
+    }
+  } catch (saveErr) {
+    console.warn('⚠️ Failed to cache successful result', saveErr);
+  }
+
+  return result;
 }
 
 async function callService(endpoint, payload, maxRetries = 3) {
@@ -230,44 +330,7 @@ async function callService(endpoint, payload, maxRetries = 3) {
   }
 }
 
-async function askQuestion(jobId, question) {
-  if (!jobId || !question) throw new Error('jobId and question are required');
-  const job = await Job.findOne({ id: jobId }).lean();
-  if (!job) throw new Error(`Job not found: ${jobId}`);
-  if (job.status !== 'done') throw new Error(`Job is not complete (status: ${job.status})`);
 
-  let scrapedText = '';
-  try {
-    const parsed = JSON.parse(job.result);
-    scrapedText = parsed.text || (Array.isArray(parsed.content) ? parsed.content.join(' ') : '') || '';
-  } catch {
-    scrapedText = job.result || '';
-  }
-
-  if (!scrapedText || scrapedText.length < 10) {
-    return { answer: 'This job did not produce enough text content to analyze.', confidence: 0 };
-  }
-
-  // PASS THE HISTORY TO PYTHON
-  const history = (job.chatHistory || []).map(msg => ({
-    role: String(msg.role || ''),
-    text: String(msg.text || '')
-  }));
-  
-  const qaResult = await callService(`${SERVICE_URLS.ai}/qa`, { 
-    text: scrapedText, 
-    question,
-    history 
-  });
-
-  if (qaResult?.answer) {
-    await Job.findOneAndUpdate(
-      { id: jobId },
-      { $push: { chatHistory: { $each: [{ role: 'user', text: question }, { role: 'bot', text: qaResult.answer }] } } }
-    );
-  }
-  return qaResult;
-}
 
 async function askSite(jobId, url, question, topK = 3) {
   if (!url || !question) throw new Error('url and question are required');
@@ -310,61 +373,19 @@ async function askSite(jobId, url, question, topK = 3) {
   };
 }
 
-async function crawlAndTrainSite(url, maxPages = 25, maxDepth = 2) {
+async function crawlAndTrainSite(url, jobId, maxPages = 25, maxDepth = 2) {
   if (!url) throw new Error('url is required');
-  const result = await callService(`${SERVICE_URLS.ai}/site/crawl-and-train`, { url, max_pages: maxPages, max_depth: maxDepth });
-  return {
-    engine: result?.engine || 'unknown',
-    pageCount: result?.training?.page_count || 0,
-    artifactPath: result?.crawl_file || null,
-    confidence: null,
-    warnings: [],
-  };
-}
 
-async function askChat(chatId, question) {
-  if (!chatId || !question) throw new Error('chatId and question are required');
-  const chat = await Chat.findOne({ id: chatId }).lean();
-  if (!chat) throw new Error('Chat not found');
-
-  // Fetch all associated jobs
-  const jobs = await Job.find({ id: { $in: chat.jobIds } }).lean();
-  
-  const texts = [];
-  const urls = [];
-
-  for (const job of jobs) {
-    if (job.type.startsWith('site')) {
-      urls.push(job.url); // Send to ChromaDB
-    } else {
-      // Extract raw text for single-page scrapes
-      try {
-        const parsed = JSON.parse(job.result);
-        const t = parsed.text || (Array.isArray(parsed.content) ? parsed.content.join(' ') : '');
-        if (t) texts.push(t);
-      } catch {
-        if (job.result) texts.push(job.result);
-      }
-    }
-  }
-
-  const history = (chat.chatHistory || []).map(msg => ({
-    role: String(msg.role || ''),
-    text: String(msg.text || '')
-  }));
-
-  // Call the new Hybrid Python endpoint
-  const qaResult = await callService(`${SERVICE_URLS.ai}/chat/ask`, { 
-    question, texts, urls, history 
+  // Step 1: Dispatch the Celery task — Python returns {task_id, status} immediately.
+  const dispatch = await callService(`${SERVICE_URLS.ai}/site/crawl-and-train`, {
+    url, max_pages: maxPages, max_depth: maxDepth, job_id: jobId
   });
+  
+  const taskId = dispatch?.task_id;
+  if (!taskId) throw new Error('Python did not return a task_id for the crawl job.');
 
-  if (qaResult?.answer) {
-    await Chat.findOneAndUpdate(
-      { id: chatId },
-      { $push: { chatHistory: { $each: [{ role: 'user', text: question }, { role: 'bot', text: qaResult.answer }] } } }
-    );
-  }
-  return qaResult;
+  // Async task dispatched successfully. Return marker.
+  return { async_task_queued: true, taskId };
 }
 
-module.exports = { handleGraphQL, getJobs, getStats };
+module.exports = { handleGraphQL, getJobs, getStats, handleWebhook };

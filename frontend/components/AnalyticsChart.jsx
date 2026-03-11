@@ -61,7 +61,7 @@ export default function AnalyticsChart({ stats }) {
           animated={mounted}
         />
         <MetricBar
-          label="Completed"
+          label="Done"
           value={stats.doneJobs}
           total={stats.totalJobs}
           color="bg-emerald-500"

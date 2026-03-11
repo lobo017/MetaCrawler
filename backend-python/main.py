@@ -8,13 +8,35 @@ from typing import Any
 from fastapi import BackgroundTasks, FastAPI, HTTPException
 from pydantic import BaseModel, Field, HttpUrl
 
-# Import the new answer_question function
-from app.nlp.processor import analyze_text, answer_question
-from app.nlp.site_qa import SiteKnowledgeBase
+from app.nlp.processor import analyze_text
 from app.scrapers.basic_scraper import scrape_url
-from app.scrapers.site_crawler import crawl_site, save_crawl
 from celery_worker import celery_app, process_nlp_task, process_quick_scrape_task
 from app.unified_rag import embed_text, get_stream_response
+from celery.result import AsyncResult
+import logging
+import json
+from datetime import datetime
+import sys
+
+class JsonFormatter(logging.Formatter):
+    def format(self, record):
+        log_obj = {
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "level": record.levelname.lower(),
+            "service": "python-ml",
+            "message": record.getMessage(),
+        }
+        if hasattr(record, "metadata"):
+            log_obj.update(record.metadata)
+        if record.exc_info:
+            log_obj["error"] = self.formatException(record.exc_info)
+        return json.dumps(log_obj)
+
+logger = logging.getLogger("metacrawler")
+logger.setLevel(logging.INFO)
+handler = logging.StreamHandler(sys.stdout)
+handler.setFormatter(JsonFormatter())
+logger.addHandler(handler)
 
 
 app = FastAPI(title="MetaCrawler Python Service", version="1.0.0")
@@ -29,16 +51,12 @@ class ScrapePayload(BaseModel):
     selector: str | None = None
     async_task: bool = False
 
-# Payload for QA
-class QAPayload(BaseModel):
-    text: str = Field(..., min_length=1)
-    question: str = Field(..., min_length=1)
-    history: list[dict[str, str]] = []
 
 class SiteTrainPayload(BaseModel):
     url: HttpUrl
     max_pages: int = Field(default=25, ge=1, le=200)
     max_depth: int = Field(default=2, ge=0, le=6)
+    job_id: str | None = None
 
 class SiteQuestionPayload(BaseModel):
     url: HttpUrl
@@ -46,13 +64,7 @@ class SiteQuestionPayload(BaseModel):
     top_k: int = Field(default=3, ge=1, le=10)
     history: list[dict[str, str]] = []
 
-class MultiChatPayload(BaseModel):
-    question: str = Field(..., min_length=1)
-    history: list[dict[str, str]] = []
-    texts: list[str] = []
-    urls: list[str] = []
-    top_k: int = Field(default=3, ge=1, le=10)
-    
+
 class EmbedPayload(BaseModel):
     job_id: str
     text: str
@@ -110,31 +122,36 @@ def quick_scrape(payload: ScrapePayload, background_tasks: BackgroundTasks) -> d
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-@app.post("/qa")
-def qa_endpoint(payload: QAPayload) -> dict[str, Any]:
-    return answer_question(payload.text, payload.question, payload.history)
+
 
 @app.post("/site/crawl-and-train")
 def crawl_and_train(payload: SiteTrainPayload) -> dict[str, Any]:
-    crawl, engine = crawl_site(str(payload.url), max_pages=payload.max_pages, max_depth=payload.max_depth)
-    crawl_file = save_crawl(str(payload.url), crawl, engine)
-    
-    # Instantiate KB with the URL, it automatically connects to the Chroma DB collection
-    kb = SiteKnowledgeBase(str(payload.url))
-    training = kb.train_from_crawl(crawl_file)
-    
-    return {
-        "crawl_file": str(crawl_file),
-        "blocked_count": len(crawl.blocked_urls),
-        "failed_count": len(crawl.failed_urls),
-        "engine": engine,
-        "fallback_order": ["go", "python", "node"],
-        "training": training,
-    }
+    """Dispatches a background Celery task. Returns task_id immediately."""
+    from celery_worker import crawl_and_train_task
+    logger.info("Dispatching Celery crawl-and-train", extra={"metadata": {"jobId": payload.job_id, "url": str(payload.url), "event": "worker_dispatched"}})
+    task = crawl_and_train_task.delay(
+        str(payload.url), payload.max_pages, payload.max_depth, payload.job_id
+    )
+    return {"task_id": task.id, "status": "queued"}
+
+
+@app.get("/tasks/{task_id}")
+def get_task_status(task_id: str) -> dict[str, Any]:
+    """Poll the status of any Celery task by its ID."""
+    result = AsyncResult(task_id)
+    if result.state == "PENDING":
+        return {"status": "pending", "result": None}
+    if result.state == "SUCCESS":
+        return {"status": "success", "result": result.result}
+    if result.state == "FAILURE":
+        return {"status": "failure", "result": str(result.info)}
+    # STARTED, RETRY, etc.
+    return {"status": result.state.lower(), "result": None}
 
 
 @app.post("/site/ask")
 def ask_site(payload: SiteQuestionPayload) -> dict[str, Any]:
+    from app.nlp.site_qa import SiteKnowledgeBase
     kb = SiteKnowledgeBase(str(payload.url))
     if kb.collection.count() == 0:
         raise HTTPException(status_code=404, detail="No trained site model found for this URL.")
@@ -143,17 +160,7 @@ def ask_site(payload: SiteQuestionPayload) -> dict[str, Any]:
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to answer: {exc}") from exc
 
-from app.nlp.processor import answer_multi_source
 
-@app.post("/chat/ask")
-def chat_ask_endpoint(payload: MultiChatPayload) -> dict[str, Any]:
-    return answer_multi_source(
-        question=payload.question, 
-        texts=payload.texts, 
-        urls=payload.urls, 
-        history=payload.history,
-        top_k=payload.top_k
-    )
 
 @app.post("/embed")
 def embed_endpoint(payload: EmbedPayload):
@@ -161,6 +168,7 @@ def embed_endpoint(payload: EmbedPayload):
 
 @app.post("/stream/chat")
 def stream_chat_endpoint(payload: StreamPayload):
+    # No extra StreamingResponse wrapper here!
     return get_stream_response(
         payload.question, 
         payload.urls, 

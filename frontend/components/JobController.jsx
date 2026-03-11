@@ -56,7 +56,7 @@ export default function JobController({ onCreated }) {
         return;
       }
 
-      setStatus(`Job started: ${result.data.createJob.id.slice(0, 8)}...`);
+      setStatus(`Job queued: ${result.data.createJob.id.slice(0, 8)}...`);
       setStatusType('success');
       await onCreated();
     } catch (e) {
@@ -172,10 +172,10 @@ export default function JobController({ onCreated }) {
         {isSubmitting ? (
           <>
             <Loader2 className="w-4 h-4 animate-spin" />
-            Processing...
+            Dispatching...
           </>
         ) : (
-          'Start Scraping Job'
+          'Queue Scraping Job'
         )}
       </motion.button>
 

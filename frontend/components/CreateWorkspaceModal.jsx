@@ -8,8 +8,8 @@ export default function CreateWorkspaceModal({ jobs, onClose, onCreated }) {
     const [selectedJobs, setSelectedJobs] = useState([]);
     const [loading, setLoading] = useState(false);
 
-    // Only allow jobs that have successfully completed
-    const completedJobs = jobs.filter(j => j.status === 'done');
+    // Only allow jobs that have successfully finished
+    const successfulJobs = jobs.filter(j => j.status === 'done');
 
     const toggleJob = (jobId) => {
         setSelectedJobs(prev =>
@@ -78,10 +78,10 @@ export default function CreateWorkspaceModal({ jobs, onClose, onCreated }) {
                             Select Data Sources ({selectedJobs.length} selected)
                         </label>
                         <div className="space-y-2 max-h-60 overflow-y-auto custom-scrollbar pr-2">
-                            {completedJobs.length === 0 ? (
-                                <p className="text-sm text-slate-500 italic">No completed jobs available to add.</p>
+                            {successfulJobs.length === 0 ? (
+                                <p className="text-sm text-slate-500 italic">No successful jobs available to add.</p>
                             ) : (
-                                completedJobs.map(job => (
+                                successfulJobs.map(job => (
                                     <label key={job.id} className={`flex items-center gap-3 p-3 rounded-xl border cursor-pointer transition-all duration-200 ${selectedJobs.includes(job.id) ? 'bg-cyan-500/10 border-cyan-500/30' : 'bg-white/[0.02] border-white/[0.06] hover:bg-white/[0.04]'}`}>
                                         <input
                                             type="checkbox"

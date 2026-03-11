@@ -15,6 +15,42 @@ services:
     depends_on:
       - redis
 
+  celery-scrape:
+    build:
+      context: ./backend-python
+    container_name: metacrawler-celery-scrape
+    command: celery -A celery_worker.celery_app worker -Q scrape -l info --concurrency=4
+    volumes:
+      - ./backend-python/data:/app/data
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
+      - SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
+    depends_on:
+      - redis
+      - mongo
+
+  celery-nlp:
+    build:
+      context: ./backend-python
+    container_name: metacrawler-celery-nlp
+    command: celery -A celery_worker.celery_app worker -Q nlp -l info --concurrency=1
+    volumes:
+      - ./backend-python/data:/app/data
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
+      - SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
+    depends_on:
+      - redis
+      - mongo
+    deploy:
+      resources:
+        reservations:
+          memory: 2G
+
   go:
     build: ./backend-go
     ports:

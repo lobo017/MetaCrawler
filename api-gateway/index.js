@@ -1,6 +1,7 @@
 /* api-gateway/index.js */
 const http = require('http');
-const { handleGraphQL, getStats, getJobs } = require('./resolvers');
+const { Readable } = require('stream'); // <-- Add this line
+const { handleGraphQL, getStats, getJobs, handleWebhook } = require('./resolvers');
 
 const port = Number(process.env.PORT || 4000);
 
@@ -44,6 +45,73 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
+  // --- Webhook Route ---
+  if (req.method === 'POST' && req.url === '/webhook/celery') {
+    const body = await readJsonBody(req);
+    try {
+      const result = await handleWebhook(body);
+      return json(res, 200, result);
+    } catch (error) {
+      console.error("Webhook Error:", error);
+      return json(res, 400, { error: error.message });
+    }
+  }
+  // --- Streaming Route ---
+  if (req.method === 'POST' && req.url === '/api/chat/stream') {
+    const body = await readJsonBody(req);
+    // Point to your Python service's internal Docker address
+    const PYTHON_URL = process.env.PYTHON_SERVICE_URL || 'http://python:8000';
+    
+    try {
+      // 1. Forward the request to the Python backend
+      // Note: Ensure your FastAPI has a matching @app.post("/chat/stream") route!
+      // Inside api-gateway/index.js
+      const aiResponse = await fetch(`${PYTHON_URL}/stream/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          question: body.question,
+          job_ids: [body.jobId],
+          history: body.history || []
+        })
+      });
+
+      if (!aiResponse.ok) {
+        return json(res, aiResponse.status, { error: 'Python streaming endpoint failed' });
+      }
+
+      // 2. Set headers to keep the connection open and allow chunked transfer
+      res.writeHead(aiResponse.status, {
+        'Content-Type': 'text/plain',
+        'Transfer-Encoding': 'chunked',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+      });
+
+      // Safely handle the stream
+      const stream = Readable.fromWeb(aiResponse.body);
+      
+      // Catch socket errors so Node doesn't crash!
+      stream.on('error', (err) => {
+        console.error('Python Stream disconnected abruptly:', err.message);
+        if (!res.headersSent) {
+           res.writeHead(500, { 'Content-Type': 'application/json' });
+           res.end(JSON.stringify({ error: 'AI stream interrupted' }));
+        } else {
+           res.end(); 
+        }
+      });
+
+      stream.pipe(res);
+      return;
+
+    } catch (error) {
+      console.error("AI Streaming Proxy Error:", error);
+      return json(res, 500, { error: 'Failed to contact AI service' });
+    }
+  }
+
+  // If the route doesn't match any of the above:
   return json(res, 404, { error: 'not found' });
 });
 
